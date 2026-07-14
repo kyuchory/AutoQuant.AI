@@ -17,7 +17,7 @@ import java.util.Map;
  * 서버 기동 시 자동 실행되며, 정상 작동 확인 후 @Component를 주석 처리하면 됩니다.
  */
 @Slf4j
-@Component
+//@Component
 public class OpenAiAnalysisServiceTest implements CommandLineRunner {
 
     private final WebClient.Builder webClientBuilder;
