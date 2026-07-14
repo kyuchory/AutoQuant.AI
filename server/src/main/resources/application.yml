@@ -1,0 +1,85 @@
+# ===================================================================
+# 1. Server Configuration
+# ===================================================================
+server:
+  port: 8080
+
+spring:
+  application:
+    name: invest-ai
+
+  # .env 파일에서 환경 변수 로드
+  config:
+    import: "optional:file:.env[.properties]"
+
+  # ===================================================================
+  # 2. Docker MySQL Connection
+  # ===================================================================
+  datasource:
+    url: jdbc:mysql://localhost:3306/invest_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # ===================================================================
+  # 3. JPA / Hibernate Configuration
+  # ===================================================================
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    hibernate:
+      ddl-auto: update
+
+  # ===================================================================
+  # 4. Docker Redis Configuration
+  # ===================================================================
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  # ===================================================================
+  # 5. Docker RabbitMQ Configuration
+  # ===================================================================
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+# ===================================================================
+# 6. Naver Open API Configuration
+# ===================================================================
+naver:
+  api:
+    url: "https://openapi.naver.com/v1/search/news.json"
+    client-id: ${NAVER_CLIENT_ID}
+    client-secret: ${NAVER_CLIENT_SECRET}
+
+
+# ===================================================================
+# 7. KIS (한국투자증권) Open API Configuration
+# ===================================================================
+kis:
+  api:
+    # 모의투자 계좌 기준 REST API base URL (실전투자: https://openapi.koreainvestment.com)
+    # ⚠️ 모의투자 서버는 기본 443 포트가 아닌 29443 포트를 사용합니다
+    rest-base-url: "https://openapivts.koreainvestment.com:29443"
+    # WebSocket 실시간 시세 엔드포인트
+    websocket-endpoint: "ws://ops.koreainvestment.com:31000"
+    # KIS Developers에서 발급받은 APP Key
+    app-key: ${KIS_APP_KEY}
+    # KIS Developers에서 발급받은 APP Secret
+    app-secret: ${KIS_APP_SECRET}
+    # 모의투자 계좌번호 (고정, 실전계좌로 변경 시 이 값만 교체)
+    account-number: "50197569"
+
+# ===================================================================
+# 8. OpenAI API Configuration
+# ===================================================================
+openai:
+  api-key: ${OPENAI_API_KEY}
+  api-url: "https://api.openai.com/v1/chat/completions"
+  model: "gpt-4o-mini"

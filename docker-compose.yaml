@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 1. 관계형 데이터베이스 (MySQL)
+  mysql:
+    image: mysql:9.0
+    container_name: invest-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: invest_db
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - invest-network
+
+  # 2. 인메모리 캐시 (Redis)
+  redis:
+    image: redis:alpine
+    container_name: invest-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - invest-network
+
+  # 3. 메시지 큐 (RabbitMQ + GUI 대시보드 포함 버전)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: invest-rabbitmq
+    ports:
+      - "5672:5672"   # 스프링 부트 서버와 통신할 구멍
+      - "15672:15672" # 우리가 크롬으로 GUI 대시보드 들어갈 구멍
+    networks:
+      - invest-network
+
+volumes:
+  mysql_data:
+
+networks:
+  invest-network:
+    driver: bridge
