@@ -77,7 +77,27 @@ kis:
     account-number: "50197569"
 
 # ===================================================================
-# 8. OpenAI API Configuration
+# 8. JWT Configuration
+# ===================================================================
+jwt:
+  secret-key: "Y29tLmV4YW1wbGUuaW52ZXN0LWFpLXNlY3JldC1rZXktZm9yLWp3dC10b2tlbi0yMDI2"
+  access-token-expiration: 3600
+  refresh-token-expiration: 1209600
+
+# ===================================================================
+# 9. Kakao OAuth2 Configuration
+# ===================================================================
+kakao:
+  oauth:
+    client-id: ${KAKAO_CLIENT_ID}
+    client-secret: ${KAKAO_CLIENT_SECRET}
+    redirect-uri: "http://localhost:8080/api/v1/auth/login/kakao/callback"
+    auth-url: "https://kauth.kakao.com/oauth/authorize"
+    token-url: "https://kauth.kakao.com/oauth/token"
+    user-info-url: "https://kapi.kakao.com/v2/user/me"
+
+# ===================================================================
+# 10. OpenAI API Configuration
 # ===================================================================
 openai:
   api-key: ${OPENAI_API_KEY}

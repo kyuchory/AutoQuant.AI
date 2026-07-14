@@ -24,6 +24,10 @@ public enum ErrorCode {
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "잔고가 부족합니다."),
     ASSET_NOT_FOUND(HttpStatus.NOT_FOUND, "자산 정보를 찾을 수 없습니다."),
 
+    // Auth
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
+
     // Report
     REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "리포트를 찾을 수 없습니다."),
     REPORT_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "리포트 생성에 실패했습니다.");
