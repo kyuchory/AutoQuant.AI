@@ -28,6 +28,9 @@ public enum ErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
 
+    // External API
+    KAKAO_API_ERROR(HttpStatus.SERVICE_UNAVAILABLE, "카카오 API 통신 오류가 발생했습니다."),
+
     // Report
     REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "리포트를 찾을 수 없습니다."),
     REPORT_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "리포트 생성에 실패했습니다.");
