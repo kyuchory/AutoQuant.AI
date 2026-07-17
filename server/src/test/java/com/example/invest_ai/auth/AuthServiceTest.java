@@ -2,11 +2,12 @@ package com.example.invest_ai.auth;
 
 import com.example.invest_ai.domain.user.entity.User;
 import com.example.invest_ai.domain.user.repository.UserRepository;
-import com.example.invest_ai.domain.user.service.AuthService;
+import com.example.invest_ai.domain.auth.service.AuthService;
 import com.example.invest_ai.global.common.ApiResponse;
 import com.example.invest_ai.global.error.CustomException;
 import com.example.invest_ai.global.error.ErrorCode;
-import com.example.invest_ai.infra.jwt.JwtTokenProvider;
+import com.example.invest_ai.global.jwt.JwtProvider;
+import com.example.invest_ai.infrastructure.redis.RedisAuthClient;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,10 +42,13 @@ class AuthServiceTest {
     private AuthService authService;
 
     @Autowired
-    private JwtTokenProvider jwtTokenProvider;
+    private JwtProvider jwtTokenProvider;
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private RedisAuthClient redisAuthClient;
 
     // ========================================================================
     // 카카오 실제 인가 코드를 여기에 입력하세요 (브라우저에서 복사)
@@ -139,12 +143,12 @@ class AuthServiceTest {
                 .build());
 
         // When: Access Token 발급
-        String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getUserId());
         log.info("   AccessToken: {}...", accessToken.substring(0, 30));
 
         // Then: 검증
-        assertTrue(jwtTokenProvider.validateToken(accessToken), "Access Token은 유효해야 합니다");
-        Long extractedUserId = jwtTokenProvider.getUserIdFromToken(accessToken);
+        assertTrue(jwtTokenProvider.validate(accessToken), "Access Token은 유효해야 합니다");
+        Long extractedUserId = jwtTokenProvider.getUserId(accessToken);
         assertEquals(user.getUserId(), extractedUserId, "토큰에서 추출한 userId가 일치해야 합니다");
 
         log.info("✅ Access Token 검증 성공 - userId: {}", extractedUserId);
@@ -165,11 +169,11 @@ class AuthServiceTest {
                 .providerId("refresh_provider_id")
                 .build());
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getUserId());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getUserId());
 
-        assertTrue(jwtTokenProvider.validateToken(refreshToken), "Refresh Token은 유효해야 합니다");
-        Long userIdFromRefresh = jwtTokenProvider.getUserIdFromToken(refreshToken);
+        assertTrue(jwtTokenProvider.validate(refreshToken), "Refresh Token은 유효해야 합니다");
+        Long userIdFromRefresh = jwtTokenProvider.getUserId(refreshToken);
         assertEquals(user.getUserId(), userIdFromRefresh);
 
         log.info("✅ Refresh Token 발급 성공 - userId: {}", userIdFromRefresh);
@@ -185,7 +189,7 @@ class AuthServiceTest {
 
         String tamperedToken = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.tampered_signature";
 
-        boolean isValid = jwtTokenProvider.validateToken(tamperedToken);
+        boolean isValid = jwtTokenProvider.validate(tamperedToken);
 
         assertFalse(isValid, "변조된 토큰은 유효하지 않아야 합니다");
         log.info("✅ 변조된 토큰 감지 완료 - validateToken: {}", isValid);
@@ -210,30 +214,16 @@ class AuthServiceTest {
         log.info("======================================================");
 
         // 카카오 로그인 실행 (인가 코드 → 카카오 토큰 → 사용자 정보 → DB 저장 → JWT 발급)
-        ApiResponse<Map<String, Object>> response = authService.kakaoLogin(realAuthCode);
+        var response = authService.login(realAuthCode);
 
         // 검증
         assertNotNull(response);
-        assertEquals(HttpStatus.OK.value(), response.status());
-
-        Map<String, Object> data = response.data();
-        assertNotNull(data);
-
-        // Access Token 검증
-        String accessToken = (String) data.get("accessToken");
-        assertNotNull(accessToken);
-        assertTrue(jwtTokenProvider.validateToken(accessToken));
-
-        // 사용자 정보 검증
-        @SuppressWarnings("unchecked")
-        Map<String, Object> user = (Map<String, Object>) data.get("user");
-        assertNotNull(user);
-        assertNotNull(user.get("userId"));
-        assertNotNull(user.get("email"));
+        assertNotNull(response.accessToken());
+        assertTrue(jwtTokenProvider.validate(response.accessToken()));
 
         log.info("✅ 카카오 로그인 통합 테스트 성공");
         log.info("   userId: {}, email: {}, nickname: {}",
-                user.get("userId"), user.get("email"), user.get("nickname"));
+                response.user().userId(), response.user().email(), response.user().nickname());
         log.info("======================================================");
     }
 
@@ -256,17 +246,18 @@ class AuthServiceTest {
                 .providerId("refresh_provider_id_2")
                 .build());
 
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user.getUserId());
+
+        // Redis에 Refresh Token 저장 (실제 로그인 플로우와 동일하게)
+        redisAuthClient.saveRefreshToken(user.getUserId(), refreshToken);
 
         // When: Refresh Token으로 Access Token 재발급
-        ApiResponse<Map<String, Object>> response = authService.refreshAccessToken(refreshToken);
+        var response = authService.refresh(refreshToken);
 
         // Then
-        assertEquals(HttpStatus.OK.value(), response.status());
-        assertNotNull(response.data().get("accessToken"));
-
-        String newAccessToken = (String) response.data().get("accessToken");
-        assertTrue(jwtTokenProvider.validateToken(newAccessToken));
+        assertNotNull(response);
+        assertNotNull(response.accessToken());
+        assertTrue(jwtTokenProvider.validate(response.accessToken()));
 
         log.info("✅ Access Token 재발급 성공");
         log.info("======================================================");
