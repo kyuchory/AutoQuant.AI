@@ -91,7 +91,7 @@ kakao:
   oauth:
     client-id: ${KAKAO_CLIENT_ID}
     client-secret: ${KAKAO_CLIENT_SECRET}
-    redirect-uri: "http://localhost:8080/api/v1/auth/login/kakao/callback"
+    redirect-uri: "http://localhost:3000/callback/kakao"
     auth-url: "https://kauth.kakao.com/oauth/authorize"
     token-url: "https://kauth.kakao.com/oauth/token"
     user-info-url: "https://kapi.kakao.com/v2/user/me"
