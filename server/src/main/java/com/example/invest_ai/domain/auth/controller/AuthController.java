@@ -61,7 +61,7 @@ public class AuthController {
 
         // 쿠키 제거
         ResponseCookie deleteCookie = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true).secure(false).sameSite("Strict").path("/").maxAge(0).build();
+                .httpOnly(true).secure(false).sameSite("Lax").path("/").maxAge(0).build();
         response.addHeader("Set-Cookie", deleteCookie.toString());
         return ApiResponse.success(null);
     }
@@ -70,8 +70,8 @@ public class AuthController {
     private void setRefreshTokenCookie(HttpServletResponse response, String token) {
         ResponseCookie cookie = ResponseCookie.from("refreshToken", token)
                 .httpOnly(true)
-                .secure(true)
-                .sameSite("Strict")
+                .secure(false)
+                .sameSite("Lax")
                 .path("/")
                 .maxAge(1209600) // 14일
                 .build();
