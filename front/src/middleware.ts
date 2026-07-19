@@ -5,6 +5,12 @@ const protectedPaths = ['/dashboard', '/conditions', '/reports'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // 루트 경로는 대시보드로 리다이렉트
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
+
   const isProtected = protectedPaths.some((p) => pathname.startsWith(p));
 
   if (!isProtected) return NextResponse.next();
@@ -21,5 +27,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/conditions/:path*', '/reports/:path*'],
+  matcher: ['/', '/dashboard/:path*', '/conditions/:path*', '/reports/:path*'],
 };
