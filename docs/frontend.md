@@ -461,7 +461,38 @@ NEXT_PUBLIC_KAKAO_REDIRECT_URI=http://localhost:3000/callback/kakao
 
 ---
 
-## 9. 절대 하지 말 것
+## 9. 다국어 처리 (i18n) — v4 신규
+
+### 9.1 기본 원칙
+
+모든 사용자 노출 텍스트는 `t()` 함수를 통해 i18n 키로 렌더링한다. 하드코딩 문자열 금지.
+
+### 9.2 파일 구조
+
+```
+src/lib/i18n/
+├── config.ts          ← i18next 초기화
+└── locales/
+    ├── ko.json        ← 한국어 번역
+    └── en.json        ← 영어 번역
+```
+
+### 9.3 언어 전환
+
+- `languageStore.ts` (Zustand)가 언어 상태 관리
+- `localStorage`의 `i18nextLng` 키에 영구 저장
+- 언어 전환 버튼은 Header 컴포넌트에 위치
+
+### 9.4 구현 규칙
+
+- `'use client'` 컴포넌트에서 `useTranslation()` 훅 사용
+- Suspense fallback 텍스트도 i18n 키 사용
+- 신규 페이지 추가 시 ko.json / en.json 키 누락 확인
+- 언어별 다른 JSX 구조(조건부 렌더링) 금지
+
+---
+
+## 10. 절대 하지 말 것
 
 - `accessToken`을 `localStorage`, `sessionStorage`, 쿠키에 저장하는 코드 작성 금지
 - `refreshToken`을 JS 코드에서 읽거나 저장하는 코드 작성 금지

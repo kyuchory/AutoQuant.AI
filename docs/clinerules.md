@@ -211,6 +211,19 @@ interface AssetState {
 - `applyOrderFilled` 호출 시점: WebSocket `ORDER_FILLED` 이벤트 수신 시
 - **assetStore가 핵심인 이유**: WebSocket 리스너는 컴포넌트 바깥(`socketClient.ts`)에 존재하므로, 컴포넌트 상태를 직접 변경할 수 없다. `useAssetStore.getState().액션()` 패턴으로 store를 통해 컴포넌트에 상태 변경을 전달하는 것이 유일한 방법이다.
 
+**Store 3 (예외): `lib/store/languageStore.ts` — 언어 설정 [v4 신규]**
+
+```typescript
+interface LanguageState {
+  language: 'ko' | 'en'
+  setLanguage: (lang: 'ko' | 'en') => void
+}
+```
+
+- 언어 설정은 Zustand store에 저장하며, `localStorage`의 `i18nextLng` 키에 영구 저장한다.
+- 이 store는 `authStore`/`assetStore`와 별개로, 다국어 처리(i18n) 전용으로 예외적으로 허용된 세 번째 store이다.
+- **언어 설정 변경 시 `I18nProvider`가 감지하여 `i18next.changeLanguage()`를 호출한다.**
+
 **7.3. 페이지 구조 (Next.js App Router)**
 
 ```
@@ -223,7 +236,7 @@ src/app/
 │   ├── dashboard/page.tsx         ← 자산현황 + 대장주 10종목 + WS 실시간 알림
 │   ├── conditions/page.tsx        ← 자동매매 조건 등록/목록/삭제 + 매매이력
 │   └── reports/[stockCode]/page.tsx ← AI 리포트 조회/새로고침
-├── layout.tsx                     ← 루트 레이아웃 (AuthProvider 래핑)
+├── layout.tsx                     ← 루트 레이아웃 (AuthProvider + I18nProvider 래핑)
 └── page.tsx                       ← / → /dashboard 리다이렉트
 ```
 
@@ -254,6 +267,60 @@ types/
 └── socket.ts      ← WS 이벤트 페이로드 타입 (PriceAlertPayload 등)
 ```
 
+**7.7. 다국어 처리 규칙 (i18n) [v4 신규]**
+
+> 이 섹션은 i18next + react-i18next 기반의 다국어 처리 구현 시 적용한다.
+
+**7.7.1. 기본 원칙**
+
+- 모든 사용자에게 노출되는 텍스트(UI 레이블, 버튼, 메시지, 에러 문구, 토스트 등)는 반드시 i18n 키를 통해 렌더링한다.
+- 하드코딩된 문자열을 화면에 직접 표시하지 않는다. 예외: 사용자 이름(DB 데이터), 종목명 등 동적 데이터.
+- 지원 언어: 한국어(ko), 영어(en) 2개. 신규 언어 추가 시 `locales/{lang}.json` 파일만 추가하면 동작해야 한다.
+
+**7.7.2. 파일 구조**
+
+```
+src/lib/i18n/
+├── config.ts          ← i18next 초기화 (lng, fallbackLng, resources)
+└── locales/
+    ├── ko.json        ← 한국어 번역
+    └── en.json        ← 영어 번역
+```
+
+**7.7.3. 키 네이밍 컨벤션**
+
+계층적 구조를 사용하며, 점(dot) 표기법으로 접근한다.
+
+| 계층 | 예시 | 설명 |
+|---|---|---|
+| 공통 | `common.appName`, `common.logout` | 전역에서 공통으로 쓰이는 문자열 |
+| 헤더 | `header.home`, `header.features` | 네비게이션 메뉴 |
+| 페이지 | `dashboard.title`, `callback.processing` | 페이지별 고유 문자열 |
+
+- 키는 반드시 소문자로 시작하며, `camelCase`를 사용한다.
+- 동적 값(변수)은 `{{variableName}}` Mustache 문법으로 표현한다. (예: `"welcomeMessage": "{{nickname}}님 환영합니다! 👋"`)
+
+**7.7.4. 언어 전환**
+
+- `src/lib/store/languageStore.ts` (Zustand)가 현재 언어 상태를 관리한다.
+- `localStorage`의 `i18nextLng` 키에 언어 설정을 영구 저장한다.
+- 언어 전환 버튼은 Header 컴포넌트에 위치시키며, 버튼 클릭 시 `languageStore.setLanguage()`를 호출한다.
+- 언어 변경 시 페이지 전체가 리렌더링되어 모든 텍스트가 즉시 전환된다.
+
+**7.7.5. 구현 규칙**
+
+- `'use client'` 컴포넌트에서 `import { useTranslation } from 'react-i18next'` 후 `const { t } = useTranslation()` 훅을 사용한다.
+- 서버 컴포넌트에서 i18n이 필요한 경우, 해당 부분만 클라이언트 컴포넌트로 분리한다.
+- `Suspense` fallback이나 로딩 UI의 텍스트도 반드시 i18n 키를 사용한다.
+- 신규 페이지/컴포넌트 추가 시 `ko.json`과 `en.json`에 누락된 키가 없는지 확인한다.
+
+**7.7.6. 절대 하지 말 것**
+
+- JSX 내부에 `"로그인"`, `"Welcome"` 같은 하드코딩 문자열 직접 삽입 금지
+- `t()` 함수 없이 텍스트를 화면에 출력하는 코드 작성 금지
+- `ko.json` / `en.json` 외부에서 번역 문자열 관리 금지
+- 언어별로 다른 JSX 구조(조건부 렌더링)를 만드는 것 금지 — 번역 파일만 다르게 유지
+
 ---
 
 8. AI Agent 자가 검증 체크리스트 (Agent Verification Checklist) [v3 업데이트]
@@ -276,7 +343,7 @@ types/
 - [ ] 외부 API 클라이언트(KIS, 네이버, OpenAI)가 `infrastructure` 패키지 하위에 소스별로 분리되어 있는가?
 
 **프론트엔드 v3 신규 항목**
-- [ ] Zustand store가 `authStore`와 `assetStore` 2개만 존재하며 임의로 추가하지 않았는가?
+- [ ] Zustand store가 `authStore`와 `assetStore` 2개만 존재하며 임의로 추가하지 않았는가? (단, `languageStore`는 i18n 전용 예외)
 - [ ] `accessToken`이 localStorage/sessionStorage가 아닌 Zustand 메모리(`authStore`)에만 저장되는가?
 - [ ] `refreshToken`을 JS 코드에서 읽거나 저장하는 코드가 단 한 줄도 없는가?
 - [ ] WebSocket 이벤트 수신 시 컴포넌트 상태를 직접 변경하지 않고 Zustand store 액션을 통해 변경하는가?
@@ -285,6 +352,13 @@ types/
 - [ ] Axios 인터셉터의 401 자동 refresh 로직에 무한루프 방지 처리가 되어 있는가?
 - [ ] 모든 API 요청/응답 타입이 `src/types/` 하위에 도메인별로 정의되어 있는가? 인라인 타입 없는가?
 - [ ] 서버 데이터(목록, 리포트 등)는 React Query, 클라이언트 전용 상태(토큰, WS 데이터)는 Zustand로 역할이 분리되어 있는가?
+
+**프론트엔드 v4 신규 항목 (i18n)**
+- [ ] 모든 사용자 노출 텍스트가 i18n 키(`t()` 함수)를 통해 렌더링되는가? 하드코딩 문자열이 없는가?
+- [ ] 신규 페이지/컴포넌트 추가 시 `ko.json` / `en.json`에 누락된 키가 없는가?
+- [ ] 언어 전환 버튼이 Header에 배치되었는가?
+- [ ] 언어 설정이 `localStorage`에 영구 저장되는가?
+- [ ] 언어별로 다른 JSX 구조(조건부 렌더링)를 사용하지 않고 번역 파일만 다른가?
 
 ---
 
