@@ -1,0 +1,61 @@
+{
+  "common": {
+    "appName": "AutoQuant AI",
+    "appSubtitle": "AI 기반 실시간 모의투자 플랫폼",
+    "login": "로그인",
+    "logout": "로그아웃",
+    "loading": "로딩 중...",
+    "processing": "처리 중...",
+    "error": "오류",
+    "success": "성공",
+    "cancel": "취소",
+    "confirm": "확인",
+    "save": "저장",
+    "delete": "삭제",
+    "close": "닫기",
+    "back": "뒤로",
+    "retry": "재시도",
+    "refresh": "새로고침"
+  },
+  "header": {
+    "dashboard": "대시보드",
+    "conditions": "매매 조건",
+    "reports": "AI 리포트",
+    "language": "언어"
+  },
+  "login": {
+    "title": "AutoQuant AI",
+    "subtitle": "AI 기반 실시간 모의투자 플랫폼",
+    "kakaoLogin": "카카오로 시작하기",
+    "googleLogin": "Google로 시작하기",
+    "description": "실시간 시세 분석과 AI 감성 분석으로\n스마트한 모의투자를 경험하세요",
+    "processing": "로그인 처리 중...",
+    "welcomeBack": "다시 오신 것을 환영합니다",
+    "startTrading": "지금 바로 AI 기반 모의투자를 시작하세요"
+  },
+  "callback": {
+    "processing": "로그인 처리 중...",
+    "redirecting": "대시보드로 이동 중..."
+  },
+  "dashboard": {
+    "title": "대시보드",
+    "welcomeMessage": "{{nickname}}님 환영합니다! 👋",
+    "walletBalance": "예수금",
+    "totalEvaluation": "총 평가금액",
+    "totalProfitLoss": "총 손익",
+    "holdings": "보유 종목",
+    "noHoldings": "보유 종목이 없습니다"
+  },
+  "conditions": {
+    "title": "자동 매매 조건",
+    "create": "조건 등록",
+    "delete": "삭제",
+    "noConditions": "등록된 조건이 없습니다"
+  },
+  "reports": {
+    "title": "AI 투자 리포트",
+    "refresh": "새로고침",
+    "noReport": "아직 생성된 리포트가 없습니다",
+    "generating": "리포트 생성 중..."
+  }
+}

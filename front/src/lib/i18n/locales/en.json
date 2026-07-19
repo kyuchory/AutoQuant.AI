@@ -1,0 +1,61 @@
+{
+  "common": {
+    "appName": "AutoQuant AI",
+    "appSubtitle": "AI-Powered Real-Time Stock Simulation",
+    "login": "Login",
+    "logout": "Logout",
+    "loading": "Loading...",
+    "processing": "Processing...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "back": "Back",
+    "retry": "Retry",
+    "refresh": "Refresh"
+  },
+  "header": {
+    "dashboard": "Dashboard",
+    "conditions": "Conditions",
+    "reports": "AI Reports",
+    "language": "Language"
+  },
+  "login": {
+    "title": "AutoQuant AI",
+    "subtitle": "AI-Powered Real-Time Stock Simulation",
+    "kakaoLogin": "Start with Kakao",
+    "googleLogin": "Start with Google",
+    "description": "Experience smart stock simulation\nwith real-time market analysis and AI sentiment analysis",
+    "processing": "Processing login...",
+    "welcomeBack": "Welcome Back",
+    "startTrading": "Start AI-powered stock simulation now"
+  },
+  "callback": {
+    "processing": "Processing login...",
+    "redirecting": "Redirecting to dashboard..."
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcomeMessage": "Welcome, {{nickname}}! 👋",
+    "walletBalance": "Wallet Balance",
+    "totalEvaluation": "Total Evaluation",
+    "totalProfitLoss": "Total P&L",
+    "holdings": "Holdings",
+    "noHoldings": "No holdings yet"
+  },
+  "conditions": {
+    "title": "Trading Conditions",
+    "create": "Create Condition",
+    "delete": "Delete",
+    "noConditions": "No conditions registered"
+  },
+  "reports": {
+    "title": "AI Investment Report",
+    "refresh": "Refresh",
+    "noReport": "No report generated yet",
+    "generating": "Generating report..."
+  }
+}
