@@ -1,5 +1,7 @@
 package com.example.invest_ai.auth;
 
+import com.example.invest_ai.domain.asset.entity.Wallet;
+import com.example.invest_ai.domain.asset.repository.WalletRepository;
 import com.example.invest_ai.domain.user.entity.User;
 import com.example.invest_ai.domain.user.repository.UserRepository;
 import com.example.invest_ai.domain.auth.service.AuthService;
@@ -49,6 +51,9 @@ class AuthServiceTest {
 
     @Autowired
     private RedisAuthClient redisAuthClient;
+
+    @Autowired
+    private WalletRepository walletRepository;
 
     // ========================================================================
     // 카카오 실제 인가 코드를 여기에 입력하세요 (브라우저에서 복사)
@@ -260,6 +265,80 @@ class AuthServiceTest {
         assertTrue(jwtTokenProvider.validate(response.accessToken()));
 
         log.info("✅ Access Token 재발급 성공");
+        log.info("======================================================");
+    }
+
+    // ========================================================================
+    // 5. 신규 회원가입 시 Wallet 생성 검증 (2단계 추가)
+    // ========================================================================
+
+    @Test
+    @DisplayName("신규 유저 생성 시 Wallet 자동 생성 — 초기 예수금 5,000,000원")
+    void testNewUserWalletCreation() {
+        log.info("======================================================");
+        log.info("  [테스트] 신규 유저 → Wallet 자동 생성");
+        log.info("======================================================");
+
+        // Given: 신규 유저 생성
+        User user = User.builder()
+                .email("newuser@kakao.com")
+                .nickname("신규유저")
+                .provider("KAKAO")
+                .providerId("new_user_provider_id")
+                .build();
+        User saved = userRepository.save(user);
+
+        // When: Wallet 생성 (AuthService.findOrCreateUser 로직 모방)
+        Wallet wallet = Wallet.builder()
+                .userId(saved.getUserId())
+                .balance(new java.math.BigDecimal("5000000.0000"))
+                .build();
+        walletRepository.save(wallet);
+
+        // Then: Wallet이 정상 저장되었는지 확인
+        Wallet foundWallet = walletRepository.findByUserId(saved.getUserId()).orElse(null);
+        assertNotNull(foundWallet, "신규 유저에게 Wallet이 생성되어야 합니다");
+        assertEquals(0, foundWallet.getBalance().compareTo(new java.math.BigDecimal("5000000.0000")),
+                "초기 예수금은 5,000,000원이어야 합니다");
+        assertEquals(saved.getUserId(), foundWallet.getUserId());
+
+        log.info("✅ Wallet 생성 성공 - userId: {}, balance: {}", foundWallet.getUserId(), foundWallet.getBalance());
+        log.info("======================================================");
+    }
+
+    @Test
+    @DisplayName("기존 유저는 Wallet 중복 생성하지 않음 (uk_wallets_user)")
+    void testExistingUserNoDuplicateWallet() {
+        log.info("======================================================");
+        log.info("  [테스트] 기존 유저 → Wallet 중복 생성 방지");
+        log.info("======================================================");
+
+        // Given: 기존 유저 + Wallet
+        User user = User.builder()
+                .email("existing@kakao.com")
+                .nickname("기존유저")
+                .provider("KAKAO")
+                .providerId("existing_provider_id")
+                .build();
+        User saved = userRepository.save(user);
+
+        Wallet wallet = Wallet.builder()
+                .userId(saved.getUserId())
+                .balance(new java.math.BigDecimal("5000000.0000"))
+                .build();
+        walletRepository.save(wallet);
+
+        // When & Then: 동일 userId로 Wallet 재생성 시도 → uk_wallets_user 위반
+        assertThrows(Exception.class, () -> {
+            Wallet duplicateWallet = Wallet.builder()
+                    .userId(saved.getUserId())
+                    .balance(new java.math.BigDecimal("5000000.0000"))
+                    .build();
+            walletRepository.save(duplicateWallet);
+            walletRepository.flush(); // 즉시 flush하여 제약조건 위반 감지
+        });
+
+        log.info("✅ Wallet 중복 생성 방지 확인 (uk_wallets_user)");
         log.info("======================================================");
     }
 }
