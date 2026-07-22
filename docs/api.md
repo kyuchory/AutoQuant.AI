@@ -405,7 +405,48 @@ wss://{host}/ws?token={accessToken}
 
 ---
 
-## 7. 엔드포인트 요약표
+## 7. 뉴스 (News) — v1.1 신규
+
+### 7.1 `GET /api/v1/news/ticker`
+
+is_monitored = TRUE인 모든 종목의 최신 뉴스 1건씩 반환합니다.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "code": "S0000",
+  "message": "OK",
+  "data": [
+    {
+      "stockCode": "005930",
+      "stockName": "삼성전자",
+      "title": "삼성전자, 고대역폭 ...",
+      "newsUrl": "https://n.news.naver.com/...",
+      "sentiment": "GOOD",
+      "aiScore": 88,
+      "publishedAt": "2026-07-22T15:30:00"
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| stockCode | string | 종목 코드 |
+| stockName | string | 종목명 |
+| title | string | 뉴스 제목 |
+| newsUrl | string | 뉴스 원문 링크 |
+| sentiment | string | AI 감성 결과 (GOOD/BAD/NEUTRAL) |
+| aiScore | int | AI 호재 점수 (0~100) |
+| publishedAt | string | 뉴스 원 발행 시간 (ISO 8601) |
+
+**에러**
+- `E4010` : 인증 토큰 없음/만료
+
+---
+
+## 8. 엔드포인트 요약표
 
 | Method | Path | 인증 | 설명 |
 |---|---|---|---|
@@ -420,4 +461,5 @@ wss://{host}/ws?token={accessToken}
 | DELETE | /api/v1/conditions/{conditionId} | Y | 조건 삭제 |
 | GET | /api/v1/reports/stocks/{stockCode} | Y | 최신 리포트 조회 |
 | POST | /api/v1/reports/stocks/{stockCode}/refresh | Y | 리포트 재생성 요청 |
+| GET | /api/v1/news/ticker | Y | 대시보드 뉴스 티커 (종목별 최신) |
 | WS | /ws | Y (쿼리 토큰) | 실시간 알림 구독 |
