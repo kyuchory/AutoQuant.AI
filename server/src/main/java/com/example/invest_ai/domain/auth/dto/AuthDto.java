@@ -16,14 +16,16 @@ public class AuthDto {
             String accessToken,
             long accessTokenExpiresIn,
             boolean isNewUser,
-            UserInfo user
+            UserInfo user,
+            String refreshToken
     ) {}
 
     /** Access Token 재발급 응답 */
     public record RefreshResponse(
             String accessToken,
             long accessTokenExpiresIn,
-            UserInfo user
+            UserInfo user,
+            String refreshToken
     ) {}
 
     /** 사용자 정보 */

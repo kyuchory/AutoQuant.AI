@@ -1,6 +1,8 @@
 package com.example.invest_ai.domain.auth.service;
 
 import com.example.invest_ai.domain.auth.dto.AuthDto.*;
+import com.example.invest_ai.domain.asset.entity.Wallet;
+import com.example.invest_ai.domain.asset.repository.WalletRepository;
 import com.example.invest_ai.domain.user.entity.User;
 import com.example.invest_ai.domain.user.repository.UserRepository;
 import com.example.invest_ai.global.error.CustomException;
@@ -14,6 +16,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
 
 /**
  * OAuth 인증 서비스 (api.md §2)
@@ -29,6 +33,10 @@ public class AuthService {
     private final JwtProvider jwtTokenProvider;
     private final RedisAuthClient redisAuthClient;
     private final UserRepository userRepository;
+    private final WalletRepository walletRepository;
+
+    /** 신규 유저 초기 예수금: 500만원 */
+    private static final BigDecimal INITIAL_BALANCE = new BigDecimal("5000000.0000");
 
     /**
      * POST /api/v1/auth/login — 카카오 OAuth 로그인
@@ -57,7 +65,7 @@ public class AuthService {
 
         UserInfo userInfo = new UserInfo(user.getUserId(), user.getNickname(), user.getEmail());
         log.info("← 로그인 성공: userId={}, isNewUser={}", user.getUserId(), isNewUser);
-        return new LoginResponse(accessToken, 3600, isNewUser, userInfo);
+        return new LoginResponse(accessToken, 3600, isNewUser, userInfo, refreshToken);
     }
 
     /**
@@ -89,7 +97,7 @@ public class AuthService {
         UserInfo userInfo = new UserInfo(user.getUserId(), user.getNickname(), user.getEmail());
 
         log.info("← Access Token 재발급 완료: userId={}", userId);
-        return new RefreshResponse(newAccessToken, 3600, userInfo);
+        return new RefreshResponse(newAccessToken, 3600, userInfo, newRefreshToken);
     }
 
     /**
@@ -125,7 +133,14 @@ public class AuthService {
                             .providerId(kakaoUser.providerId())
                             .build();
                     User saved = userRepository.save(newUser);
-                    log.info("✅ 신규 회원가입: userId={}, email={}", saved.getUserId(), saved.getEmail());
+
+                    // 신규 유저 Wallet 생성 (초기 예수금 500만원)
+                    Wallet wallet = Wallet.builder()
+                            .userId(saved.getUserId())
+                            .balance(INITIAL_BALANCE)
+                            .build();
+                    walletRepository.save(wallet);
+                    log.info("✅ 신규 회원가입 + Wallet 생성: userId={}, initialBalance={}", saved.getUserId(), INITIAL_BALANCE);
                     return saved;
                 });
     }

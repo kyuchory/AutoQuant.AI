@@ -32,8 +32,8 @@ public class AuthController {
     ) {
         LoginResponse loginResponse = authService.login(request.code());
 
-        // Refresh Token → HttpOnly Secure SameSite Strict Cookie
-        setRefreshTokenCookie(response, loginResponse.accessToken());
+        // Refresh Token → HttpOnly Secure SameSite Lax Cookie
+        setRefreshTokenCookie(response, loginResponse.refreshToken());
         return ApiResponse.success(loginResponse);
     }
 
@@ -46,7 +46,7 @@ public class AuthController {
         String refreshToken = extractRefreshToken(request);
         RefreshResponse refreshResponse = authService.refresh(refreshToken);
 
-        setRefreshTokenCookie(response, refreshResponse.accessToken());
+        setRefreshTokenCookie(response, refreshResponse.refreshToken());
         return ApiResponse.success(refreshResponse);
     }
 
