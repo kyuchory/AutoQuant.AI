@@ -73,8 +73,10 @@ kis:
     app-key: ${KIS_APP_KEY}
     # KIS Developers에서 발급받은 APP Secret
     app-secret: ${KIS_APP_SECRET}
-    # 모의투자 계좌번호 (고정, 실전계좌로 변경 시 이 값만 교체)
-    account-number: "50197569"
+    # 모의투자 계좌번호 — KIS 주문 바디 CANO (8자리, 실전계좌로 변경 시 교체)
+    account-no: "50197569"
+    # 모의투자 계좌 상품코드 — KIS 주문 바디 ACNT_PRDT_CD (모의투자 고정값 "01")
+    account-prdt-cd: "01"
 
 # ===================================================================
 # 8. JWT Configuration
