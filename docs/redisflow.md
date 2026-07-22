@@ -30,6 +30,8 @@
 | 7 | 동시성 락 | `rate:order:lock:{userId}:{stockCode}` | `"locked"` | String (NX 옵션으로 SET) | **4초** | 조건 매칭 워커 (주문 시도 직전) | 동일 워커 (락 존재 여부 확인) | 확정 |
 | 8 | 전역 레이트리미터 | `rate:kis:global:orderCount` | 슬라이딩 윈도우 카운터 | String (INCR) 또는 Sorted Set | **1초** (윈도우 주기에 맞춰 자동 만료) | 주문 실행 클라이언트 (호출 직전 INCR) | 동일 클라이언트 (한도 초과 시 큐잉/대기) | 확정 |
 | 9 | 웹소켓 라우팅 | `ws:session:{userId}` | 접속 여부/서버 인스턴스 ID | String | 30분 (핑퐁 연장) + onClose 시 즉시 DEL | WebSocket 연결/해제 핸들러 | 조건 매칭 워커 (알림 전송 대상 판별) | **보류 — 확장 포인트로만 기록, 지금은 미구현** |
+| **10** | **차트 캐시** | **`chart:{stockCode}:daily:{period}`** | **ChartResponse JSON** | **String** | **D:10분, W:1시간, M:6시간, Y:24시간** | **`ChartService` (Cache Miss 시 KIS 호출 후 저장)** | **`GET /charts/{stockCode}/daily?period=`** | **v5 신규** |
+| **11** | **차트 캐시(분봉)** | **`chart:{stockCode}:minute`** | **ChartResponse JSON** | **String** | **다음날 09:00까지** | **`ChartService` (장 마감 후 저장)** | **`GET /charts/{stockCode}/minute`** | **v5 신규** |
 
 ---
 

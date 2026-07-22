@@ -95,7 +95,8 @@ Zustand와 React Query는 경쟁 관계가 아니라 역할이 다르다.
 | 클라이언트 전용 상태 | **Zustand** | 서버 요청 없이 클라이언트에서만 존재하는 데이터 |
 
 Zustand를 새로 추가하고 싶은 상황이 생기면, 먼저 **"이게 React Query로 해결 안 되나?"** 를 확인한다.
-대부분의 서버 데이터는 React Query가 더 적합하다. **Zustand store는 2개 고정이 원칙이다.**
+대부분의 서버 데이터는 React Query가 더 적합하다. **클라이언트 전용 실시간 상태(KIS WebSocket 시세, WebSocket 알림 등)에 한해 추가를 허용한다.**
+Store 개수를 늘릴 때는 반드시 설계 문서에 기록하고 사유를 명시한다.
 
 ---
 
@@ -496,7 +497,7 @@ src/lib/i18n/
 
 - `accessToken`을 `localStorage`, `sessionStorage`, 쿠키에 저장하는 코드 작성 금지
 - `refreshToken`을 JS 코드에서 읽거나 저장하는 코드 작성 금지
-- Zustand store를 3개 이상으로 늘리는 것 금지 (React Query로 대체 가능한지 먼저 확인)
+- Zustand store를 사유 없이 무분별하게 늘리는 것 금지 — 추가 시 설계 문서에 기록하고 클라이언트 전용 실시간 상태(WebSocket 시세 등)인지 확인
 - WebSocket 이벤트 수신 시 컴포넌트 상태를 직접 변경하는 코드 작성 금지 (반드시 store 액션 경유)
 - `types/` 외부에 인라인 타입 정의 금지
 - `middleware.ts`에서 `accessToken`(메모리)으로 인증 판별 시도 금지 — 서버사이드에서 접근 불가
