@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import StockSidebar from '@/components/dashboard/StockSidebar'
 import CandleChart from '@/components/dashboard/CandleChart'
+import NewsTicker from '@/components/dashboard/NewsTicker'
 
 export default function DashboardPage() {
   const [selectedStockCode, setSelectedStockCode] = useState('005930')
@@ -19,10 +20,13 @@ export default function DashboardPage() {
         selectedStockCode={selectedStockCode}
         onSelectStock={handleSelectStock}
       />
-      <CandleChart
-        stockCode={selectedStockCode}
-        stockName={selectedStockName}
-      />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <NewsTicker />
+        <CandleChart
+          stockCode={selectedStockCode}
+          stockName={selectedStockName}
+        />
+      </div>
     </div>
   )
 }
