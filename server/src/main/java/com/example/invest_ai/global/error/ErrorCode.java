@@ -22,7 +22,15 @@ public enum ErrorCode {
 
     // Asset
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "잔고가 부족합니다."),
+    INSUFFICIENT_QUANTITY(HttpStatus.BAD_REQUEST, "보유 수량이 부족합니다."),
     ASSET_NOT_FOUND(HttpStatus.NOT_FOUND, "자산 정보를 찾을 수 없습니다."),
+    DUPLICATE_HOLDING(HttpStatus.CONFLICT, "이미 보유 중인 종목입니다."),
+    HOLDING_NOT_FOUND(HttpStatus.NOT_FOUND, "보유하지 않은 종목입니다."),
+
+    // Stock
+    STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 종목입니다."),
+    PRICE_UNAVAILABLE(HttpStatus.NOT_FOUND, "현재 시세를 조회할 수 없습니다."),
+    CHART_DATA_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "차트 데이터를 조회할 수 없습니다."),
 
     // Auth
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 Refresh Token입니다."),
