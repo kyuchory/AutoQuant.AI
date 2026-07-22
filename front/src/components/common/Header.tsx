@@ -35,7 +35,7 @@ export default function Header() {
             alt="AutoQuant AI"
             width={180}
             height={50}
-            style={{ objectFit: 'contain' }}
+            style={{ objectFit: 'contain', height: 'auto' }}
             priority
           />
         </div>
