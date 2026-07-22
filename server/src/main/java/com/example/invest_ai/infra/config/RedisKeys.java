@@ -16,6 +16,7 @@ public final class RedisKeys {
     // Domain 상수
     // ========================================================================
     private static final String DOMAIN_PRICE = "price";
+    private static final String DOMAIN_CHART  = "chart";
     private static final String DOMAIN_REPORT = "report";
     private static final String DOMAIN_AUTH = "auth";
     private static final String DOMAIN_KIS = "kis";
