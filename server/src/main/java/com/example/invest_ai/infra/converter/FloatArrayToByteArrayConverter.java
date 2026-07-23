@@ -19,6 +19,22 @@ import java.nio.ByteOrder;
 @Converter
 public class FloatArrayToByteArrayConverter implements AttributeConverter<float[], byte[]> {
 
+    /**
+     * byte[] → float[] 변환 (코사인 유사도 계산용 static 유틸리티)
+     */
+    public static float[] toFloatArray(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return new float[0];
+        }
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
+        buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        float[] result = new float[bytes.length / Float.BYTES];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = buffer.getFloat();
+        }
+        return result;
+    }
+
     @Override
     public byte[] convertToDatabaseColumn(float[] attribute) {
         if (attribute == null) {
