@@ -15,6 +15,8 @@ public class RabbitMqConfig {
     public static final String EXCHANGE_NAME = "invest-network";
     public static final String NEWS_QUEUE = "news-queue";
     public static final String NEWS_ROUTING_KEY = "news.#";
+    public static final String REPORT_QUEUE = "report-queue";
+    public static final String REPORT_ROUTING_KEY = "report.#";
 
     @Bean
     public TopicExchange investExchange() {
@@ -34,6 +36,18 @@ public class RabbitMqConfig {
         return BindingBuilder.bind(newsQueue())
                 .to(investExchange())
                 .with(NEWS_ROUTING_KEY);
+    }
+
+    @Bean
+    public Queue reportQueue() {
+        return new Queue(REPORT_QUEUE, true);
+    }
+
+    @Bean
+    public Binding reportBinding() {
+        return BindingBuilder.bind(reportQueue())
+                .to(investExchange())
+                .with(REPORT_ROUTING_KEY);
     }
 
     @Bean
