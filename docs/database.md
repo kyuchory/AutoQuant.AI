@@ -308,7 +308,7 @@ CREATE TABLE news_sentiments (
 |---|---|---|---|
 | report_id | BIGINT | PK, AUTO_INCREMENT | 리포트 식별 ID |
 | user_id | BIGINT | FK(users.user_id) | 리포트 수신 유저 |
-| report_content | TEXT | NOT NULL | AI 생성 리포트 본문 (Markdown 포맷) |
+| report_content | TEXT | NOT NULL | AI 생성 리포트 본문 (JSON 포맷 — title, recent, opinion, avgScore, good, bad, neutral, createdAt) |
 | created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 리포트 생성 일시 |
 
 ```sql

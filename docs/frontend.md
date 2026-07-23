@@ -48,7 +48,7 @@ front/src/
 │   │   └── AuthProvider.tsx           ← 탭 재접속 시 accessToken 자동 복구
 │   ├── assets/                        ← 자산 카드, 보유종목 테이블, 종목 카드
 │   ├── conditions/                    ← 조건 등록 폼, 조건 목록, 매매이력 테이블
-│   └── reports/                       ← 리포트 Markdown 뷰어, 새로고침 버튼
+│   └── reports/                       ← 리포트 JSON 뷰어 (점수 배지, 감성 태그, 생성일시, AI 경고문, 다국어)
 │
 ├── lib/
 │   ├── api/

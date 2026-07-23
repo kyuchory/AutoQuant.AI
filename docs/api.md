@@ -347,12 +347,17 @@ Redis 캐시 우선 조회. 캐시 미스 시 `ai_investment_reports`의 최신 
   "data": {
     "reportId": 301,
     "stockCode": "005930",
-    "reportContent": "## 삼성전자 투자 분석\n...",
+    "stockName": "삼성전자",
+    "reportContent": "{\"title\":\"삼성전자 투자 리포트\",\"recent\":\"최근 삼성전자는...\",\"opinion\":\"종합 의견...\",\"avgScore\":82,\"good\":3,\"bad\":0,\"neutral\":1,\"createdAt\":\"2026-07-22T21:00:00\"}",
     "createdAt": "2026-07-12T09:00:00",
     "cacheHit": true
   }
 }
 ```
+- `reportContent`는 AI가 생성한 JSON 문자열 (`title`, `recent`, `opinion`, `avgScore`, `good`, `bad`, `neutral`, `createdAt`)
+- `avgScore`: 24시간 내 관련 뉴스의 평균 AI 감성 점수 (0~100)
+- `good`/`bad`/`neutral`: 감성 분포 개수
+- `createdAt`: 리포트 생성 일시 (ISO 8601)
 
 **에러**
 - `E4041` : 아직 생성된 리포트가 없는 경우 → 프론트는 "새로고침" 버튼 유도

@@ -96,7 +96,7 @@
 
 - Chroma 등 별도 Vector DB 설치 단계 **삭제**.
 - `news_sentiments.embedding` 컬럼에 이미 저장된 벡터를 그대로 활용.
-- 사용자가 리포트를 요청하면 MySQL Vector Search로 관련 뉴스 요약 3~4건을 검색 → `trading_histories`(매매 이력)와 결합 → OpenAI Chat API로 맞춤 리포트 생성 → `ai_investment_reports`에 저장.
+- 사용자가 리포트를 요청하면 MySQL Vector Search로 관련 뉴스 요약 최대 10건을 검색(코사인 유사도 기준) → 제목+요약+감성 점수를 프롬프트로 조립 → OpenAI Chat API로 JSON 리포트 생성 → `ai_investment_reports`에 저장.
 
 ---
 
@@ -133,9 +133,9 @@
         │
         ▼
 [RabbitListener Worker]
-   ④ MySQL Vector Search로 관련 뉴스 3~4건 검색 (RAG-Retrieval)
-   ⑤ 질문 + 뉴스 요약 + 최근 매매이력 → 프롬프트 조립 (RAG-Augmentation)
-   ⑥ OpenAI Chat API 호출 (RAG-Generation)
+   ④ MySQL Vector Search로 관련 뉴스 최대 10건 검색 (RAG-Retrieval)
+   ⑤ 제목 + 뉴스 요약 + 감성 점수 + 통계 → 프롬프트 조립 (RAG-Augmentation)
+   ⑥ OpenAI Chat API 호출 → JSON 리포트 생성 (RAG-Generation)
    ⑦ 결과를 ai_investment_reports에 저장 + Redis 캐싱
         │
         ▼
@@ -148,9 +148,9 @@
 
 | RAG 단계 | 학술적 정의 | 본 프로젝트 구현 |
 |---|---|---|
-| R (Retrieval) | 질문과 관련된 문서를 벡터 유사도로 검색 | MySQL `VECTOR` 컬럼 기준 유사도 검색으로 뉴스 **요약** 3~4건 검색 |
-| A (Augmentation) | 검색 문서 + 질문을 하나의 프롬프트로 조립 | `[뉴스 요약들] + [사용자 질문] + [최근 매매 이력]` 조립 |
-| G (Generation) | LLM으로 최종 답변 생성 | OpenAI Chat API 호출 → 리포트 생성 |
+| R (Retrieval) | 질문과 관련된 문서를 벡터 유사도로 검색 | MySQL `VECTOR` 컬럼 기준 코사인 유사도 검색으로 뉴스 **요약** 최대 10건 검색 |
+| A (Augmentation) | 검색 문서 + 질문을 하나의 프롬프트로 조립 | `[제목 + 뉴스 요약 + 감성 점수 + 통계]` 조립 |
+| G (Generation) | LLM으로 최종 답변 생성 | OpenAI Chat API 호출 → JSON 리포트 생성(`title`, `recent`, `opinion`, `avgScore`, `good`, `bad`, `neutral`, `createdAt`) |
 
 > 뉴스가 요약 수준이므로, 프롬프트에는 "아래는 뉴스 요약이며 상세 본문이 아님을 감안해 분석하라"는 지시를 포함해 할루시네이션(요약에 없는 세부사항을 지어내는 것)을 방지한다.
 
