@@ -9,7 +9,7 @@ import Image from 'next/image';
 const NAV_ITEMS = [
   { path: '/dashboard', labelKey: 'header.dashboard' },
   { path: '/conditions', labelKey: 'header.conditions' },
-  { path: '/reports', labelKey: 'header.reports' },
+  { path: '/reports/005930', labelKey: 'header.reports' },
 ];
 
 export default function Header() {
