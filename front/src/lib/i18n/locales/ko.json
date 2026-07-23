@@ -56,6 +56,17 @@
     "title": "AI 투자 리포트",
     "refresh": "새로고침",
     "noReport": "아직 생성된 리포트가 없습니다",
-    "generating": "리포트 생성 중..."
+    "generating": "리포트 생성 중...",
+    "cached": "캐시됨",
+    "noReportYet": "아직 생성된 리포트가 없습니다.",
+    "clickToGenerate": "Refresh 버튼을 클릭하여 AI 분석 리포트를 생성해보세요.",
+    "generateReport": "리포트 생성하기",
+    "refreshReport": "새로고침",
+    "recentNews": "최근 뉴스 요약",
+    "opinion": "종합 의견",
+    "sentimentGood": "긍정",
+    "sentimentBad": "부정",
+    "sentimentNeutral": "중립",
+    "disclaimer": "⚠️ 본 리포트는 AI가 생성한 정보로, 투자 참고용으로만 제공됩니다. 최종 투자 판단과 그에 따른 손익은 전적으로 투자자 본인에게 책임이 있습니다."
   }
 }

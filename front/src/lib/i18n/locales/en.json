@@ -39,7 +39,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcomeMessage": "Welcome, {{nickname}}! 👋",
+    "welcomeMessage": "Welcome, {{nickname}}!",
     "walletBalance": "Wallet Balance",
     "totalEvaluation": "Total Evaluation",
     "totalProfitLoss": "Total P&L",
@@ -56,6 +56,17 @@
     "title": "AI Investment Report",
     "refresh": "Refresh",
     "noReport": "No report generated yet",
-    "generating": "Generating report..."
+    "generating": "Generating report...",
+    "cached": "Cached",
+    "noReportYet": "No report generated yet.",
+    "clickToGenerate": "Click the Refresh button to generate an AI analysis report.",
+    "generateReport": "Generate Report",
+    "refreshReport": "Refresh",
+    "recentNews": "Recent News Summary",
+    "opinion": "Overall Opinion",
+    "sentimentGood": "Good",
+    "sentimentBad": "Bad",
+    "sentimentNeutral": "Neutral",
+    "disclaimer": "⚠️ This report is AI-generated and provided for informational purposes only. All investment decisions and resulting gains or losses are solely the responsibility of the investor."
   }
 }
