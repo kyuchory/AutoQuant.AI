@@ -13,9 +13,6 @@ import java.util.Map;
 
 /**
  * OpenAI API 클라이언트 (WebClient 기반 — clinerules §4.4 준수)
- *
- * Chat API:  POST {base-url}/chat/completions
- * Embedding: POST {base-url}/embeddings
  */
 @Slf4j
 @Component
@@ -38,9 +35,7 @@ public class OpenAiClient {
                 .build();
     }
 
-    /**
-     * 뉴스 감성 분석 — ChatGPT API 호출 (temperature=0.1)
-     */
+    /** 감성 분석 — temperature=0.1 */
     public SentimentResult analyzeSentiment(String title, String description) {
         String userMessage = String.format("""
                 아래 뉴스 제목과 요약을 분석하여 투자 관점에서 감성 점수를 매겨주세요.
@@ -76,20 +71,44 @@ public class OpenAiClient {
                     .block();
             return parseSentimentResponse(response);
         } catch (Exception e) {
-            log.error("[OpenAI 감성분석] 실패: {}", e.getMessage());
+            log.error("[OpenAI] 감성분석 실패: {}", e.getMessage());
             return SentimentResult.neutral("OpenAI 호출 실패: " + e.getMessage());
         }
     }
 
-    /**
-     * 임베딩 벡터 생성 — OpenAI Embedding API (text-embedding-ada-002, 1536차원)
-     */
+    /** 리포트 생성 — temperature=0.7, max_tokens=1000 */
+    public String generateReport(String prompt) {
+        Map<String, Object> body = Map.of(
+                "model", model,
+                "messages", List.of(
+                        Map.of("role", "system", "content",
+                                "당신은 투자 분석 전문가입니다. 응답은 반드시 아래 JSON 형식으로만 출력하세요. 다른 설명은 절대 포함하지 마세요. 주식코드(숫자)는 절대 포함하지 마세요."),
+                        Map.of("role", "user", "content", prompt)
+                ),
+                "temperature", 0.7,
+                "max_tokens", 1000
+        );
+        try {
+            String response = webClient.post()
+                    .uri("/chat/completions")
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            JsonNode root = objectMapper.readTree(response);
+            return root.path("choices").get(0).path("message").path("content").asText();
+        } catch (Exception e) {
+            log.error("[OpenAI] 리포트 생성 실패: {}", e.getMessage());
+            return "리포트 생성에 실패했습니다. 잠시 후 다시 시도해주세요.";
+        }
+    }
+
+    /** 임베딩 벡터 생성 — 1536차원 */
     public float[] generateEmbedding(String text) {
         Map<String, Object> body = Map.of(
                 "model", "text-embedding-ada-002",
                 "input", text
         );
-
         try {
             String response = webClient.post()
                     .uri("/embeddings")
@@ -97,7 +116,6 @@ public class OpenAiClient {
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
-
             JsonNode root = objectMapper.readTree(response);
             JsonNode embedding = root.path("data").get(0).path("embedding");
             float[] vector = new float[embedding.size()];
@@ -106,26 +124,22 @@ public class OpenAiClient {
             }
             return vector;
         } catch (Exception e) {
-            log.error("[OpenAI 임베딩] 실패: {}", e.getMessage());
+            log.error("[OpenAI] 임베딩 실패: {}", e.getMessage());
             return new float[1536];
         }
     }
 
-    /**
-     * Chat API 응답 JSON에서 choices[0].message.content 추출 → SentimentResult 파싱
-     */
     private SentimentResult parseSentimentResponse(String apiResponse) {
         try {
             JsonNode root = objectMapper.readTree(apiResponse);
             String content = root.path("choices").get(0).path("message").path("content").asText();
             String cleaned = content.trim();
-            // 마크다운 코드블록 제거
             if (cleaned.startsWith("```")) {
                 cleaned = cleaned.replaceAll("(?s)```json\\s*|```", "").trim();
             }
             return objectMapper.readValue(cleaned, SentimentResult.class);
         } catch (Exception e) {
-            log.warn("[OpenAI 감성분석] 응답 파싱 실패, raw={}", apiResponse);
+            log.warn("[OpenAI] 응답 파싱 실패, raw={}", apiResponse);
             return SentimentResult.neutral("응답 파싱 실패");
         }
     }
