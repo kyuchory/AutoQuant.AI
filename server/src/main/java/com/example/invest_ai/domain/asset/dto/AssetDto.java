@@ -35,8 +35,14 @@ public class AssetDto {
     public record OrderRequest(
             @NotBlank String stockCode,
             @NotBlank String orderType,   // BUY 또는 SELL
-            @Min(1) int quantity
-    ) {}
+            @Min(1) int quantity,
+            String ordDvsn,               // "01": 시장가(기본값), "00": 지정가
+            BigDecimal price              // 지정가 주문 시 가격 (시장가는 null)
+    ) {
+        public String ordDvsn() {
+            return ordDvsn != null ? ordDvsn : "01";
+        }
+    }
 
     /** 주문 응답 */
     public record OrderResponse(
