@@ -39,6 +39,8 @@ public class AssetService {
         String stockCode = request.stockCode();
         String orderType = request.orderType().toUpperCase();
         int quantity = request.quantity();
+        String ordDvsn = request.ordDvsn();
+        BigDecimal orderPrice = request.price();
 
         Stock stock = stockRepository.findById(stockCode)
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_NOT_FOUND, "종목이 존재하지 않습니다: " + stockCode));
@@ -81,7 +83,7 @@ public class AssetService {
         tradingHistoryRepository.save(history);
 
         try {
-            kisOrderClient.executeOrder(stockCode, orderType, quantity);
+            kisOrderClient.executeOrder(stockCode, orderType, quantity, ordDvsn, orderPrice);
         } catch (Exception e) {
             log.error("KIS 주문 API 실패: {}", e.getMessage());
             history.markFailed(e.getMessage());
