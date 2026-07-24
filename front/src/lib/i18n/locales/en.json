@@ -68,5 +68,35 @@
     "sentimentBad": "Bad",
     "sentimentNeutral": "Neutral",
     "disclaimer": "⚠️ This report is AI-generated and provided for informational purposes only. All investment decisions and resulting gains or losses are solely the responsibility of the investor."
+  },
+  "trading": {
+    "buy": "Buy",
+    "sell": "Sell",
+    "currentPrice": "Current Price",
+    "marketPrice": "Market",
+    "limitPrice": "Limit",
+    "orderPrice": "Order Price",
+    "quantity": "Quantity",
+    "max": "Max",
+    "estimatedTotal": "Estimated Total",
+    "processing": "Processing...",
+    "shares": " shares",
+    "orderFilled": "Order Filled",
+    "executionPrice": "Execution Price",
+    "total": "Total",
+    "orderFailed": "Order Failed"
+  },
+  "execution": {
+    "price": "Price",
+    "volume": "Volume",
+    "changeRate": "Change",
+    "accVolume": "Acc. Vol",
+    "time": "Time",
+    "waiting": "⏳ Waiting for real-time data..."
+  },
+  "sidebar": {
+    "stockName": "Stock",
+    "currentPrice": "Price",
+    "prevDayChange": "Chg%"
   }
 }
