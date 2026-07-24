@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import apiClient from '@/lib/api/client'
 import { useChartStore } from '@/lib/store/chartStore'
 import type { ApiResponse } from '@/types/api'
@@ -9,6 +10,7 @@ interface StockInfo {
   stockCode: string
   stockName: string
   currentPrice: number
+  changeRate: number
 }
 
 interface StockSidebarProps {
@@ -17,8 +19,8 @@ interface StockSidebarProps {
 }
 
 export default function StockSidebar({ selectedStockCode, onSelectStock }: StockSidebarProps) {
+  const { t } = useTranslation()
   const [stocks, setStocks] = useState<StockInfo[]>([])
-  const [prevPrices, setPrevPrices] = useState<Record<string, number>>({})
   const prices = useChartStore((s) => s.prices)
 
   useEffect(() => {
@@ -26,9 +28,13 @@ export default function StockSidebar({ selectedStockCode, onSelectStock }: Stock
       .then(r => {
         const list = r.data.data ?? []
         setStocks(list)
-        const init: Record<string, number> = {}
-        list.forEach(s => { init[s.stockCode] = s.currentPrice })
-        setPrevPrices(init)
+        // REST API 초기 데이터를 chartStore에 반영 (장 마감/서버 재시작 대응)
+        const store = useChartStore.getState()
+        list.forEach(s => {
+          if (!store.prices[s.stockCode]) {
+            store.updatePrice(s.stockCode, Number(s.currentPrice ?? 0), s.changeRate ?? 0)
+          }
+        })
       })
       .catch(() => {})
   }, [])
@@ -36,30 +42,26 @@ export default function StockSidebar({ selectedStockCode, onSelectStock }: Stock
   const formatPrice = (price: number) =>
     price.toLocaleString('ko-KR')
 
-  const getChangeRate = (code: string, current: number): { rate: number; prev: number } => {
-    const prev = prevPrices[code] ?? current
-    if (prev === 0) return { rate: 0, prev: current }
-    return { rate: ((current - prev) / prev) * 100, prev }
-  }
-
-  const getColor = (current: number, prev: number) => {
-    if (current > prev) return { color: '#ef5350', sign: '+' }
-    if (current < prev) return { color: '#1976d2', sign: '' }
+  /** KIS 전일대비 등락률 기준 색상 */
+  const getColor = (changeRate: number) => {
+    if (changeRate > 0) return { color: '#ef5350', sign: '+' }
+    if (changeRate < 0) return { color: '#1976d2', sign: '' }
     return { color: '#d1d4dc', sign: '' }
   }
 
   return (
     <div className="stock-sidebar">
       <div className="sidebar-header">
-        <span className="text-xs font-medium" style={{ color: '#787b86' }}>종목명</span>
-        <span className="text-xs font-medium text-right" style={{ color: '#787b86' }}>현재가</span>
-        <span className="text-xs font-medium text-right" style={{ color: '#787b86' }}>등락률</span>
+        <span className="text-xs font-medium" style={{ color: '#787b86' }}>{t('sidebar.stockName')}</span>
+        <span className="text-xs font-medium text-right" style={{ color: '#787b86' }}>{t('sidebar.currentPrice')}</span>
+        <span className="text-xs font-medium text-right" style={{ color: '#787b86' }}>{t('sidebar.prevDayChange')}</span>
       </div>
       <div className="sidebar-list">
         {stocks.map(stock => {
-          const currentPrice = prices[stock.stockCode] ?? stock.currentPrice
-          const { rate, prev } = getChangeRate(stock.stockCode, currentPrice)
-          const { color, sign } = getColor(currentPrice, prev)
+          const data = prices[stock.stockCode]
+          const currentPrice = data?.price ?? stock.currentPrice
+          const changeRate = data?.changeRate ?? 0
+          const { color, sign } = getColor(changeRate)
           const isSelected = stock.stockCode === selectedStockCode
 
           return (
@@ -71,7 +73,7 @@ export default function StockSidebar({ selectedStockCode, onSelectStock }: Stock
               <span className="stock-name" style={{ color: '#d1d4dc' }}>{stock.stockName}</span>
               <span className="stock-price" style={{ color }}>{formatPrice(currentPrice)}</span>
               <span className="stock-change" style={{ color }}>
-                {sign}{rate.toFixed(2)}%
+                {sign}{changeRate.toFixed(2)}%
               </span>
             </div>
           )
