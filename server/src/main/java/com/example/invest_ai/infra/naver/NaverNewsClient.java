@@ -41,11 +41,11 @@ public class NaverNewsClient {
                     .block();
 
             if (response == null || response.items() == null) {
-                log.info("[네이버 뉴스] query={} 결과 없음", query);
+                log.debug("[네이버 뉴스] query={} 결과 없음", query);
                 return List.of();
             }
 
-            log.info("[네이버 뉴스] query={} total={} display={}", query, response.total(), response.display());
+            log.debug("[네이버 뉴스] query={} total={} display={}", query, response.total(), response.display());
             return response.items();
         } catch (Exception e) {
             log.error("[네이버 뉴스] query={} 수집 실패: {}", query, e.getMessage());
