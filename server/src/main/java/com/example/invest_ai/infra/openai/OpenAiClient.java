@@ -37,7 +37,7 @@ public class OpenAiClient {
 
     /** 감성 분석 — temperature=0.1 */
     public SentimentResult analyzeSentiment(String title, String description) {
-        String userMessage = String.format("""
+        String userMessage = """
                 아래 뉴스 제목과 요약을 분석하여 투자 관점에서 감성 점수를 매겨주세요.
                 - sentiment: GOOD, BAD, NEUTRAL 중 하나
                 - aiScore: 0(매우 부정) ~ 100(매우 긍정)
@@ -50,7 +50,7 @@ public class OpenAiClient {
 
                 제목: %s
                 요약: %s
-                """.formatted(title, description));
+                """.formatted(title, description);
 
         Map<String, Object> body = Map.of(
                 "model", model,
@@ -59,7 +59,8 @@ public class OpenAiClient {
                                 "당신은 주식 뉴스 분석 전문가입니다. 항상 지정된 JSON 형식으로만 응답하세요."),
                         Map.of("role", "user", "content", userMessage)
                 ),
-                "temperature", 0.1
+                "temperature", 0.1,
+                "response_format", Map.of("type", "json_object")
         );
 
         try {
@@ -86,7 +87,8 @@ public class OpenAiClient {
                         Map.of("role", "user", "content", prompt)
                 ),
                 "temperature", 0.7,
-                "max_tokens", 1000
+                "max_tokens", 1000,
+                "response_format", Map.of("type", "json_object")
         );
         try {
             String response = webClient.post()
