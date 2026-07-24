@@ -162,8 +162,49 @@ public class KisChartClient {
         return List.of();
     }
 
+    /**
+     * 주식현재가 시세 조회 (FHKST01010100)
+     * Redis miss 시 전일대비 등락률 fallback 용도
+     */
+    public record CurrentQuote(long price, double changeRate) {}
+
+    public CurrentQuote getCurrentQuote(String stockCode) {
+        String uri = UriComponentsBuilder
+                .fromPath("/uapi/domestic-stock/v1/quotations/inquire-price")
+                .queryParam("FID_COND_MRKT_DIV_CODE", "J")
+                .queryParam("FID_INPUT_ISCD", stockCode)
+                .toUriString();
+
+        try {
+            Map<String, Object> response = withAuth(uri, "FHKST01010100")
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response != null) {
+                String rtCd = String.valueOf(response.get("rt_cd"));
+                if (!"0".equals(rtCd)) return null;
+
+                @SuppressWarnings("unchecked")
+                Map<String, String> output = (Map<String, String>) response.get("output");
+                if (output != null) {
+                    long price = parseLong(output.get("stck_prpr"));
+                    double changeRate = parseDouble(output.get("prdy_ctrt"));
+                    return new CurrentQuote(price, changeRate);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("KIS 현재가 시세 조회 실패: stockCode={}, err={}", stockCode, e.getMessage());
+        }
+        return null;
+    }
+
     private long parseLong(String value) {
         if (value == null || value.isEmpty()) return 0L;
         try { return Long.parseLong(value); } catch (NumberFormatException e) { return 0L; }
+    }
+    private double parseDouble(String value) {
+        if (value == null || value.isEmpty()) return 0.0;
+        try { return Double.parseDouble(value); } catch (NumberFormatException e) { return 0.0; }
     }
 }
