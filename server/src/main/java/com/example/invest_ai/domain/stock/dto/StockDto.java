@@ -10,6 +10,7 @@ public class StockDto {
     public record StockInfo(
             String stockCode,
             String stockName,
-            BigDecimal currentPrice
+            BigDecimal currentPrice,
+            double changeRate
     ) {}
 }
