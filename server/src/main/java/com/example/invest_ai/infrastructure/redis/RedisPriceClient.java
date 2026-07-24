@@ -9,6 +9,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,20 @@ public class RedisPriceClient {
         }
 
         return new BigDecimal(value);
+    }
+
+    /** 전일대비 등락률 조회 (Redis miss 시 null 반환) */
+    public Double getChangeRate(String stockCode) {
+        String key = RedisKeys.priceChangeRate(stockCode);
+        String value = redisTemplate.opsForValue().get(key);
+        if (value == null || value.isEmpty()) return null;
+        try { return Double.parseDouble(value); } catch (NumberFormatException e) { return null; }
+    }
+
+    /** 전일대비 등락률 저장 (TTL 24시간) */
+    public void setChangeRate(String stockCode, double changeRate) {
+        String key = RedisKeys.priceChangeRate(stockCode);
+        redisTemplate.opsForValue().set(key, String.valueOf(changeRate), Duration.ofHours(24));
     }
 
     /** 여러 종목 현재가 일괄 조회 */
