@@ -140,7 +140,7 @@ public class KisWebsocketClient {
     }
 
     private void handleMessage(String payload) {
-        log.info("📩 [KIS RAW] {}", payload.substring(0, Math.min(300, payload.length())));
+        log.debug("📩 [KIS RAW] {}", payload.substring(0, Math.min(300, payload.length())));
         try {
             // "\u0000" prefix 제거 (KIS WebSocket 특이사항)
             String cleaned = payload;
@@ -210,29 +210,78 @@ public class KisWebsocketClient {
 
     private void processPipeData(String payload) {
         try {
-            // KIS pipe-delimited format: 0|H0STCNT0|001|005930^143058^259250^2^...
+            // KIS H0STCNT0 pipe 필드 (실제 데이터 검증 완료):
+            // fields[0]=MKSC_SHRN_ISCD, [1]=STCK_CNTG_HOUR, [2]=STCK_PRPR(체결가),
+            // [3]=PRDY_VRSS_SIGN(전일대비부호: 2=상승, 5=하락),
+            // [5]=PRDY_CTRT(등락률), [12]=CNTG_VOL(체결량), [13]=ACML_VOL(누적거래량)
             String[] parts = payload.split("\\|");
             if (parts.length >= 4 && "H0STCNT0".equals(parts[1])) {
-                // parts[3] = "005930^143058^259250^2^15250^..."  (^ 구분자)
                 String[] fields = parts[3].split("\\^");
-                if (fields.length >= 3) {
-                    String stockCode = fields[0];   // e.g. 005930
-                    String priceStr = fields[2];    // e.g. 259250 (현재 체결가)
-                    redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), priceStr);
-                    log.debug("→ Redis SET price:{}:current = {}", stockCode, priceStr);
+                if (fields.length >= 6) {
+                    String stockCode = fields[0];
+                    String timeStr   = fields.length > 1 ? fields[1] : "";          // 체결시간 HHMMSS
+                    String priceStr  = fields[2];                                   // 체결가
+                    String sign      = fields.length > 21 ? fields[21] : "5";       // 매수/매도 구분 (1:매수, 5:매도)
+                    String changeStr = fields.length > 5 ? fields[5] : "0";         // 등락률 PRDY_CTRT
+                    String volumeStr = fields.length > 12 ? fields[12] : "0";       // 체결량 CNTG_VOL
 
-                    // 실시간 알림 브로드캐스트
+                    // 디버그 로그: 실제 KIS pipe 필드 인덱스 확인용
+                    log.debug("📊 [PIPE DEBUG] stock={}, fields[3]={}, fields[10]={}, fields[11]={}, fields[21]={}, fields[22]={}, fields[23]={}",
+                            stockCode,
+                            fields.length > 3 ? fields[3] : "N/A",
+                            fields.length > 10 ? fields[10] : "N/A",
+                            fields.length > 11 ? fields[11] : "N/A",
+                            fields.length > 21 ? fields[21] : "N/A",
+                            fields.length > 22 ? fields[22] : "N/A",
+                            fields.length > 23 ? fields[23] : "N/A");
+                    String acmlVol   = fields.length > 13 ? fields[13] : "0";       // 누적거래량 ACML_VOL
+
+                    // Redis 현재가 + 등락률 저장
+                    redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), priceStr);
+                    redisTemplate.opsForValue().set(RedisKeys.priceChangeRate(stockCode), changeStr);
+
                     long currentPrice = Long.parseLong(priceStr);
-                    Map<String, Object> alert = Map.of(
+                    long volume = parseLongSafe(volumeStr);
+                    double changeRate = parseDoubleSafe(changeStr);
+                    long accumulatedVolume = parseLongSafe(acmlVol);
+
+                    // ① PRICE_ALERT (기존 기능 — 차트/사이드바 현재가 갱신 + 전일대비 등락률)
+                    Map<String, Object> priceAlert = Map.of(
                             "stockCode", stockCode,
-                            "currentPrice", currentPrice
+                            "currentPrice", currentPrice,
+                            "changeRate", changeRate
                     );
-                    sessionManager.broadcast("PRICE_ALERT", alert);
+                    sessionManager.broadcast("PRICE_ALERT", priceAlert);
+
+                    // ② EXECUTION (체결 내역 — ExecutionList 용)
+                    String formattedTime = formatChegyeolTime(timeStr);
+                    Map<String, Object> execution = Map.of(
+                            "stockCode", stockCode,
+                            "price", currentPrice,
+                            "volume", volume,
+                            "changeRate", changeRate,
+                            "accumulatedVolume", accumulatedVolume,
+                            "time", formattedTime,
+                            "sign", sign  // "2"=상승(매수, 빨강), "5"=하한(매도, 파랑), "4"=하락, "3"=상한
+                    );
+                    sessionManager.broadcast("EXECUTION", execution);
                 }
             }
         } catch (Exception e) {
             log.debug("Pipe 파싱 실패: {}", e.getMessage());
         }
+    }
+
+    private long parseLongSafe(String s) {
+        try { return Long.parseLong(s); } catch (Exception e) { return 0L; }
+    }
+    private double parseDoubleSafe(String s) {
+        try { return Double.parseDouble(s); } catch (Exception e) { return 0.0; }
+    }
+    /** HHMMSS → HH:MM:SS 포맷 변환 */
+    private String formatChegyeolTime(String raw) {
+        if (raw == null || raw.length() < 6) return raw;
+        return raw.substring(0, 2) + ":" + raw.substring(2, 4) + ":" + raw.substring(4, 6);
     }
 
     /** Map<String, String>에서 stck_prpr(현재가) 추출 */
