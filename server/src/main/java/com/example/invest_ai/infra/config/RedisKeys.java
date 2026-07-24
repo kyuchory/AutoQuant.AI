@@ -24,10 +24,11 @@ public final class RedisKeys {
     private static final String DOMAIN_WS = "ws";
 
     // ========================================================================
-    // 1. 시세: price:{stockCode}:current
+    // 1. 시세: price:{stockCode}:current / price:{stockCode}:changeRate
     // ========================================================================
     private static final String SUB_PRICE = null; // sub-domain 없음
     private static final String TYPE_PRICE_CURRENT = "current";
+    private static final String TYPE_PRICE_CHANGE_RATE = "changeRate";
 
     /**
      * 실시간 현재 체결가 키를 반환합니다.
@@ -37,6 +38,16 @@ public final class RedisKeys {
      */
     public static String priceCurrent(String stockCode) {
         return key(DOMAIN_PRICE, stockCode, TYPE_PRICE_CURRENT);
+    }
+
+    /**
+     * 전일대비 등락률 캐시 키를 반환합니다.
+     * Writer: KisWebsocketClient (WebSocket 실시간 SET), StockService (KIS REST API fallback)
+     * Reader: StockService, StockSidebar 초기화
+     * TTL: 24시간 (장 마감 후 다음날 장 시작 전까지 유지)
+     */
+    public static String priceChangeRate(String stockCode) {
+        return key(DOMAIN_PRICE, stockCode, TYPE_PRICE_CHANGE_RATE);
     }
 
     // ========================================================================
