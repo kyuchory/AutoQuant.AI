@@ -138,7 +138,8 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
   }, [stockCode, period])
 
   // 실시간 가격 업데이트
-  const realtimePrice = prices[stockCode]
+  const priceData = prices[stockCode]
+  const realtimePrice = priceData?.price
   useEffect(() => {
     if (!realtimePrice || !candleSeriesRef.current || !candleSeriesRef.current.data().length) return
 
