@@ -467,4 +467,5 @@ is_monitored = TRUE인 모든 종목의 최신 뉴스 1건씩 반환합니다.
 | GET | /api/v1/reports/stocks/{stockCode} | Y | 최신 리포트 조회 |
 | POST | /api/v1/reports/stocks/{stockCode}/refresh | Y | 리포트 재생성 요청 |
 | GET | /api/v1/news/ticker | Y | 대시보드 뉴스 티커 (종목별 최신) |
+| GET | /api/v1/stocks | Y | 모니터링 종목 + Redis 현재가 + 전일대비 등락률 |
 | WS | /ws | Y (쿼리 토큰) | 실시간 알림 구독 |

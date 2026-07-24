@@ -49,6 +49,12 @@ front/src/
 │   ├── assets/                        ← 자산 카드, 보유종목 테이블, 종목 카드
 │   ├── conditions/                    ← 조건 등록 폼, 조건 목록, 매매이력 테이블
 │   └── reports/                       ← 리포트 JSON 뷰어 (점수 배지, 감성 태그, 생성일시, AI 경고문, 다국어)
+│   └── dashboard/
+│       ├── CandleChart.tsx            ← 캔들 차트
+│       ├── NewsTicker.tsx             ← 뉴스 티커
+│       ├── StockSidebar.tsx           ← 종목 사이드바
+│       ├── TradingPanel.tsx           ← 매수/매도 패널 (시장가/지정가, 수량, 비율 버튼)
+│       └── ExecutionList.tsx          ← 실시간 체결 내역 테이블 (체결가/체결량(매수:빨강/매도:파랑)/등락률/누적거래량/시간)
 │
 ├── lib/
 │   ├── api/
@@ -300,6 +306,7 @@ export const SOCKET_EVENTS = {
   ORDER_FILLED: 'ORDER_FILLED',
   ORDER_FAILED: 'ORDER_FAILED',
   REPORT_READY: 'REPORT_READY',
+  EXECUTION: 'EXECUTION',
 } as const
 ```
 
@@ -312,6 +319,7 @@ export const SOCKET_EVENTS = {
 | `ORDER_FILLED` | `{ historyId, stockCode, executionPrice, executionQuantity }` | 토스트 + `assetStore.applyOrderFilled()` |
 | `ORDER_FAILED` | `{ historyId, stockCode, failureReason }` | 토스트 알림 표시 |
 | `REPORT_READY` | `{ stockCode, reportId }` | 해당 stockCode 리포트 페이지 자동 재조회 |
+| `EXECUTION` | `{ stockCode, price, volume, changeRate, accumulatedVolume, time }` | executionStore.pushExecution() → ExecutionList 실시간 갱신 |
 
 ### 5.3 연결 규칙
 

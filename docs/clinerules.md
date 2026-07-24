@@ -227,16 +227,43 @@ interface LanguageState {
 **Store 4 (예외): `lib/store/chartStore.ts` — 실시간 시세 (KIS WebSocket PRICE_ALERT) [v5 신규]**
 
 ```typescript
+interface PriceData {
+  price: number
+  changeRate: number    // KIS 전일대비 등락률 (fields[5] PRDY_CTRT)
+}
+
 interface ChartState {
-  prices: Record<string, number>        // stockCode → 현재가
-  updatePrice: (stockCode: string, price: number) => void
+  prices: Record<string, PriceData>        // stockCode → {price, changeRate}
+  updatePrice: (stockCode: string, price: number, changeRate: number) => void
 }
 ```
 
-- KIS WebSocket이 push하는 실시간 체결가(PRICE_ALERT)를 `socketClient.ts` → `useChartStore.getState().updatePrice()` 로 수신한다.
-- `StockSidebar`(사이드바 현재가+등락률)와 `CandleChart`(캔들차트 실시간 업데이트)가 이 store를 구독한다.
+- KIS WebSocket이 push하는 실시간 체결가(PRICE_ALERT)를 `socketClient.ts` → `useChartStore.getState().updatePrice()` 로 수신한다. `changeRate`는 KIS 전일대비 등락률(fields[5])을 그대로 사용한다.
+- `StockSidebar`(사이드바 현재가+전일대비 등락률)와 `CandleChart`(캔들차트 실시간 업데이트)가 이 store를 구독한다.
 - 이 store는 `authStore`/`assetStore`와 별개로, KIS 실시간 시세(WebSocket 전용 데이터) 처리를 위해 허용된 store이다.
 - **추가 사유**: WebSocket PRICE_ALERT 페이로드에는 `conditionId`가 없고 순수 시세 정보(stockCode + currentPrice)만 포함된다. assetStore는 보유 종목만 관리하므로, 10종목 전체 시세를 관리할 별도 store가 필요했다.
+
+**Store 5 (예외): `lib/store/executionStore.ts` — 실시간 체결 내역 (KIS WebSocket EXECUTION) [v6 신규]**
+
+```typescript
+interface ExecutionItem {
+  stockCode: string
+  price: number         // 체결가
+  volume: number        // 체결량
+  changeRate: number    // 등락률
+  accumulatedVolume: number // 누적거래량
+  time: string          // 체결시간 HH:MM:SS
+}
+
+interface ExecutionState {
+  executions: ExecutionItem[]
+  pushExecution: (item: ExecutionItem) => void
+}
+```
+
+- KIS WebSocket `EXECUTION` 이벤트 수신 시 `socketClient.ts` → `useExecutionStore.getState().pushExecution()` 으로 최대 30건까지 유지.
+- `ExecutionList` 컴포넌트가 이 store를 구독해 실시간 체결 내역 테이블을 렌더링한다.
+- **추가 사유**: 체결 내역은 클라이언트 전용 실시간 WebSocket 데이터로, 서버 DB에 저장되지 않는다. 컴포넌트 바깥(`socketClient.ts`)에서 수신하므로 Zustand store를 통한 상태 전달이 유일한 방법이다.
 
 **7.3. 페이지 구조 (Next.js App Router)**
 
@@ -265,7 +292,7 @@ src/app/
 
 - `lib/socket/socketClient.ts`에서 연결·재연결·이벤트 핸들링을 전담한다.
 - 이벤트 수신 시 직접 컴포넌트 상태를 건드리지 않고 반드시 Zustand store 액션을 통해 상태를 변경한다.
-- 이벤트 타입 상수는 `lib/socket/socketEvents.ts`에 고정한다: `PRICE_ALERT`, `AI_SCORE_ALERT`, `ORDER_FILLED`, `ORDER_FAILED`, `REPORT_READY`
+- 이벤트 타입 상수는 `lib/socket/socketEvents.ts`에 고정한다: `PRICE_ALERT`, `AI_SCORE_ALERT`, `ORDER_FILLED`, `ORDER_FAILED`, `REPORT_READY`, `EXECUTION`
 
 **7.6. 타입 정의 규칙**
 
