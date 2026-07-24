@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 /**
@@ -54,8 +55,11 @@ public class KisOrderClient {
      * @param stockCode 종목코드 (예: 005930)
      * @param orderType BUY 또는 SELL
      * @param quantity  주문 수량
+     * @param ordDvsn   "01": 시장가, "00": 지정가
+     * @param price     지정가 주문 시 가격 (시장가는 null)
      */
-    public void executeOrder(String stockCode, String orderType, int quantity) {
+    public void executeOrder(String stockCode, String orderType, int quantity,
+                             String ordDvsn, BigDecimal price) {
         // Redis에서 KIS Access Token 조회
         String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
         if (accessToken == null || accessToken.isEmpty()) {
@@ -65,13 +69,15 @@ public class KisOrderClient {
         String trId = "BUY".equalsIgnoreCase(orderType) ? "VTTC0802U" : "VTTC0801U";
 
         // KIS 주문 바디 — 모든 숫자 필드는 String으로 전송
+        String ordUnpr = "01".equals(ordDvsn) ? "0"
+                : (price != null ? String.valueOf(price.longValue()) : "0");
         Map<String, String> body = Map.of(
                 "CANO", accountNo,
                 "ACNT_PRDT_CD", accountPrdtCd,
                 "PDNO", stockCode,
-                "ORD_DVSN", "01",          // 시장가
+                "ORD_DVSN", ordDvsn != null ? ordDvsn : "01",
                 "ORD_QTY", String.valueOf(quantity),
-                "ORD_UNPR", "0"            // 시장가 주문 시 0
+                "ORD_UNPR", ordUnpr
         );
 
         log.info("→ KIS 주문 요청: trId={}, stockCode={}, orderType={}, qty={}", trId, stockCode, orderType, quantity);
