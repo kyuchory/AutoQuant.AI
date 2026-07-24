@@ -3,6 +3,7 @@
 import { useAuthStore } from '@/lib/store/authStore'
 import { useAssetStore } from '@/lib/store/assetStore'
 import { useChartStore } from '@/lib/store/chartStore'
+import { useExecutionStore } from '@/lib/store/executionStore'
 import { SOCKET_EVENTS } from './socketEvents'
 
 class SocketClient {
@@ -43,11 +44,15 @@ class SocketClient {
         switch (type) {
           case SOCKET_EVENTS.PRICE_ALERT:
             useAssetStore.getState().updateHoldingPrice(payload.stockCode, payload.currentPrice)
-            useChartStore.getState().updatePrice(payload.stockCode, payload.currentPrice)
+            useChartStore.getState().updatePrice(payload.stockCode, payload.currentPrice, payload.changeRate ?? 0)
             break
 
           case SOCKET_EVENTS.ORDER_FILLED:
             useAssetStore.getState().applyOrderFilled(payload)
+            break
+
+          case SOCKET_EVENTS.EXECUTION:
+            useExecutionStore.getState().pushExecution(payload)
             break
 
           default:
