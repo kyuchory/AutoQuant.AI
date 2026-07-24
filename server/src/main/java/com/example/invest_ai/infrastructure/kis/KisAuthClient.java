@@ -47,8 +47,8 @@ public class KisAuthClient {
         log.info("🔑 KIS 인증 토큰 초기 발급 완료");
     }
 
-    /** 5.5시간(19800초) 주기로 토큰 갱신 */
-    @Scheduled(fixedRate = 19800000)
+    /** 5.5시간(19800초) 주기로 토큰 갱신 (최초 120초 지연 → 초기 발급과 충돌 방지) */
+    @Scheduled(fixedRate = 19800000, initialDelay = 120000)
     public void scheduledRefresh() {
         log.info("⏰ KIS 토큰 정기 갱신 시작");
         issueTokens();
