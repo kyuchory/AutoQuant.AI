@@ -70,8 +70,8 @@ KIS WebSocket H0STCNT0 TR 수신 시 `^` 구분자로 분할된 파이프 데이
 |--------|-----------|------|------|
 | `fields[0]` | MKSC_SHRN_ISCD | 종목코드 | |
 | `fields[1]` | STCK_CNTG_HOUR | 체결시간 (HHMMSS) | ExecutionList |
-| `fields[2]` | STCK_PRPR | 체결가 | **PRICE_ALERT**, ExecutionList |
-| `fields[5]` | PRDY_CTRT | 전일대비 등락률 | **PRICE_ALERT**, ExecutionList, StockSidebar |
+| `fields[2]` | STCK_PRPR | 체결가 | **PRICE_TICK**, ExecutionList |
+| `fields[5]` | PRDY_CTRT | 전일대비 등락률 | **PRICE_TICK**, ExecutionList, StockSidebar |
 | `fields[9]` | CNTG_VOL | 체결량 | ExecutionList |
 | `fields[12]` | PRDY_VRSS_SIGN | 전일대비 부호 | |
 | `fields[13]` | ACML_VOL | 누적거래량 | ExecutionList |

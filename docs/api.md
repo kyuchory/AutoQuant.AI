@@ -264,7 +264,9 @@ Refresh Token(쿠키)으로 Access Token 재발급. Rotation 정책에 따라 Re
 
 ---
 
-## 4. 자동 매매 조건 (Conditions)
+## 4. 자동 매매 조건 (Conditions) — v4 (트리거/액션 분리)
+
+> `trading_conditions`(액션) + `condition_triggers`(트리거) 1:N 구조. 자세한 트리거 유형 매핑은 `database.md §⑤-1` 참조.
 
 ### 4.1 `POST /api/v1/conditions`
 
@@ -272,38 +274,73 @@ Refresh Token(쿠키)으로 Access Token 재발급. Rotation 정책에 따라 Re
 ```json
 {
   "stockCode": "005930",
-  "targetPrice": 85000.0000,
-  "priceConditionType": "ABOVE",
-  "targetAiScore": 80,
-  "aiConditionType": "ABOVE",
-  "conditionLogic": "AND",
   "orderType": "BUY",
-  "orderQuantity": 3
+  "orderQuantity": 3,
+  "orderPriceType": "MARKET",
+  "limitPrice": null,
+  "conditionLogic": "AND",
+  "executionMode": "AUTO",
+  "isPersistent": false,
+  "triggers": [
+    {
+      "triggerType": "PRICE",
+      "baseType": "CURRENT_PRICE",
+      "compareType": "ABOVE",
+      "targetValue": 85000.0000,
+      "isRate": false
+    }
+  ]
 }
 ```
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
 | stockCode | string | Y | 종목 코드 |
-| targetPrice | decimal | N | `priceConditionType`과 세트 |
-| priceConditionType | string | N | `ABOVE`, `BELOW` |
-| targetAiScore | int | N | `aiConditionType`과 세트, 0~100 |
-| aiConditionType | string | N | `ABOVE`, `BELOW` |
-| conditionLogic | string | Y | `AND`, `OR` (조건 1개만 설정 시 무시됨) |
 | orderType | string | Y | `BUY`, `SELL` |
 | orderQuantity | int | Y | 1 이상 |
+| orderPriceType | string | N | `MARKET`(기본) / `LIMIT` |
+| limitPrice | decimal | N | `LIMIT` 시 지정가 (MARKET이면 null) |
+| conditionLogic | string | N | `AND`(기본) / `OR` — 복수 트리거 결합 |
+| executionMode | string | N | `AUTO`(기본 - 완전자동) / `MANUAL`(반자동 승인 제안) |
+| isPersistent | boolean | N | `false`(기본, 1회성 — 실행 후 `isActive=false`) / `true`(반복 감시 — 실행 후에도 `isActive=true` 유지) |
+| triggers | array | Y | 발동 조건 목록 (1~10개) |
+| triggers[].triggerType | string | Y | `PRICE` / `PROFIT_TARGET` / `STOP_LOSS` / `TRAILING_STOP` / `AI_SCORE` |
+| triggers[].baseType | string | Y | `CURRENT_PRICE` / `AVG_PRICE` / `HIGHEST_PRICE` / `AI_SCORE` |
+| triggers[].compareType | string | Y | `ABOVE` / `BELOW` |
+| triggers[].targetValue | decimal | Y | 목표값(절대가격 또는 %) |
+| triggers[].isRate | boolean | N | true면 `targetValue`는 % |
 
-**검증 규칙 (DTO 레벨, `chk_conditions_type_pair`와 동일)**
-- (targetPrice ≠ null AND priceConditionType ≠ null) OR (targetAiScore ≠ null AND aiConditionType ≠ null) 이어야 함
-- 위반 시 `E4001` + 메시지 "가격 조건 또는 AI 점수 조건을 값-타입 쌍으로 입력해야 합니다."
+**트리거 타입별 표준 조합**
 
-**Response 201**
+| 기능 | triggerType | baseType | compareType | isRate |
+|---|---|---|---|---|
+| 가격 감시 | PRICE | CURRENT_PRICE | ABOVE/BELOW | false |
+| 익절 | PROFIT_TARGET | AVG_PRICE | ABOVE | true |
+| 손절 | STOP_LOSS | AVG_PRICE | BELOW | true |
+| 트레일링 스탑 | TRAILING_STOP | HIGHEST_PRICE | BELOW | true |
+| AI 자동매매 | AI_SCORE | AI_SCORE | ABOVE/BELOW | false |
+
+**Response 200**
 ```json
 {
   "success": true,
   "code": "S0000",
   "message": "OK",
-  "data": { "conditionId": 55, "isActive": true }
+  "data": {
+    "conditionId": 55,
+    "stockCode": "005930",
+    "orderType": "BUY",
+    "orderQuantity": 3,
+    "orderPriceType": "MARKET",
+    "conditionLogic": "AND",
+    "executionMode": "AUTO",
+    "isActive": true,
+    "isPersistent": false,
+    "triggers": [
+      { "triggerType": "PRICE", "baseType": "CURRENT_PRICE", "compareType": "ABOVE", "targetValue": 85000.0000, "isRate": false }
+    ],
+    "createdAt": "2026-08-13T22:00:00"
+  }
 }
 ```
 
@@ -311,15 +348,49 @@ Refresh Token(쿠키)으로 Access Token 재발급. Rotation 정책에 따라 Re
 
 ### 4.2 `GET /api/v1/conditions`
 
-내가 설정한 조건 목록 (페이징).
+내가 설정한 조건 목록 (배열 응답).
 
-**Query Parameters**: `page`, `size`, `isActive`(optional)
-
-**Response 200**: §1.5 페이징 래퍼 + `trading_conditions` 필드 목록.
+**Response 200**: `TradingConditionResponse[]` 배열 (트리거 포함).
 
 ---
 
-### 4.3 `DELETE /api/v1/conditions/{conditionId}`
+### 4.3 `PATCH /api/v1/conditions/{conditionId}/active`
+
+조건 감시 ON/OFF 토글.
+
+**Request Body**
+```json
+{ "isActive": false }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| isActive | boolean | Y | true=감시 시작, false=감시 중지 |
+
+**Response 200**: §4.1 응답과 동일한 `TradingConditionResponse`.
+
+**에러**
+- `E4030` : 본인 소유가 아닌 조건
+- `E4041` : 존재하지 않는 conditionId
+
+---
+
+### 4.4 `PUT /api/v1/conditions/{conditionId}`
+
+조건 전체 수정 (액션 + 트리거 교체).
+
+**Request Body**: §4.1의 `POST /conditions`와 동일한 `TradingConditionRequest`.
+
+**Response 200**: §4.1 응답과 동일한 `TradingConditionResponse`.
+
+**에러**
+- `E4001` : 트리거 값-타입 검증 위반
+- `E4030` : 본인 소유가 아닌 조건
+- `E4041` : 존재하지 않는 conditionId
+
+---
+
+### 4.5 `DELETE /api/v1/conditions/{conditionId}`
 
 **Response 200**
 ```json
@@ -402,11 +473,13 @@ wss://{host}/ws?token={accessToken}
 
 | type | 발생 시점 | payload 예시 |
 |---|---|---|
-| `PRICE_ALERT` | 가격 조건 충족 | `{ conditionId, stockCode, currentPrice }` |
+| `PRICE_TICK` | KIS 실시간 체결가 수신 (전체 모니터링 종목, 조건과 무관) | `{ stockCode, currentPrice, changeRate }` |
+| `PRICE_ALERT` | 가격 조건 충족 (v8: `PRICE_TICK`과 이름 분리) | `{ conditionId, stockCode, currentPrice }` |
 | `AI_SCORE_ALERT` | AI 감성 점수 조건 충족 | `{ conditionId, stockCode, aiScore }` |
 | `ORDER_FILLED` | 자동/수동 주문 체결 완료 | `{ historyId, stockCode, executionPrice, executionQuantity }` |
 | `ORDER_FAILED` | 자동 주문 체결 실패 | `{ historyId, stockCode, failureReason }` |
 | `REPORT_READY` | RAG 리포트 생성 완료 | `{ stockCode, reportId }` |
+| `ORDER_PROPOSAL` | 반자동 조건(MANUAL) 충족 시 매매 제안 | `{ conditionId, stockCode, stockName, orderType, orderQuantity, orderPriceType, limitPrice, currentPrice, triggerReason, aiScore, aiSentiment, aiReason, newsTitle, newsUrl, newsSummary, newsPublishedAt }` |
 
 ---
 

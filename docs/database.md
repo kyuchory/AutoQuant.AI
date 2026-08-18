@@ -1,8 +1,12 @@
-# 실시간 AI 모의투자 시스템 — 테이블 설계 문서 (v3)
+# 실시간 AI 모의투자 시스템 — 테이블 설계 문서 (v5)
 
 > 개정 사항(v2): `user_assets` → `user_wallets` + `user_holdings` 분리 / `trading_conditions`에 `condition_logic`(AND/OR) 추가 / `has_triggered` boolean → `status` 상태값으로 변경 / `news_sentiments.content` → `content_summary`로 정정 (네이버 API는 요약만 제공)
 >
 > 개정 사항(v3): `trading_conditions`의 CHECK 제약을 조건-타입 쌍 단위로 촘촘하게 보완 / 모든 UNIQUE·CHECK 제약조건에 `uk_`, `chk_` 네이밍 컨벤션을 적용해 명시적으로 이름 부여 (JPA 매핑 및 예외 핸들링 대비)
+>
+> 개정 사항(v4): `trading_conditions`를 "액션(주문)" 중심으로 재편하고, 발동 조건을 `condition_triggers`(트리거) 테이블로 1:N 분리. 이를 통해 고정가격 감시·손절(Stop-Loss)·익절(Take-Profit)·트레일링 스탑(Trailing Stop)·스탑 지정가/시장가·AI 점수 자동매매를 하나의 모델로 통합 확장. 실행 모드(`execution_mode`: AUTO/MANUAL) 지원. (DB는 `ddl-auto: none` 수동 관리로 전환)
+>
+> 개정 사항(v5): `trading_conditions`에 `is_persistent`(BOOLEAN, 기본 FALSE) 추가. 조건 실행 후 `is_persistent=FALSE`(기본, 1회성)면 기존과 동일하게 `is_active=FALSE`로 비활성화하고, `is_persistent=TRUE`면 실행 후에도 `is_active=TRUE`를 유지해 반복 감시를 지원한다.
 
 ---
 
@@ -17,6 +21,7 @@
 | 전체 | Chroma/Pinecone 등 별도 Vector DB 전제 | MySQL `VECTOR(1536)` 단일화 확정, 문서상 혼선 제거 | v2 |
 | `trading_conditions` | CHECK가 "둘 중 하나는 NOT NULL"만 강제 → `target_price`만 넣고 `price_condition_type`을 빠뜨려도 통과됨 | 조건-타입 쌍 단위로 CHECK 재정의 (`chk_conditions_type_pair`) | v3 |
 | 전체 테이블 | UNIQUE/CHECK 제약조건에 이름이 없거나 일관성 없음 → JPA 예외 핸들링 시 원인 식별 어려움 | `uk_<table>_<column(s)>`, `chk_<table>_<desc>` 컨벤션으로 전체 통일 | v3 |
+| `trading_conditions` | 단일 테이블에 "발동 조건"과 "주문 액션"을 혼재 → 손절/익절(평단가 대비 %)·트레일링 스탑(고점 추적)·스탑 주문·AI 자동매매를 표현 불가 | `trading_conditions`(액션) + `condition_triggers`(트리거, 1:N)로 분리. `trigger_type`/`base_type`/`compare_type`/`is_rate` 및 `execution_mode`(AUTO/MANUAL) 도입 | v4 |
 
 ---
 
@@ -42,6 +47,7 @@ users ──1:N── user_holdings ──N:1── stocks
 users ──1:N── trading_conditions ──N:1── stocks
 users ──1:N── trading_histories ──N:1── stocks
                     trading_histories ──N:1── trading_conditions (nullable, 수동매매는 NULL)
+trading_conditions ──1:N── condition_triggers
 stocks ──1:N── news_sentiments
 users ──1:N── ai_investment_reports
 ```
@@ -152,86 +158,99 @@ CREATE TABLE user_holdings (
 );
 ```
 
-> **JPA/예외 핸들링 활용 예시**: `user_holdings`에 이미 존재하는 `(user_id, stock_code)` 조합으로 INSERT를 시도하면 `DataIntegrityViolationException`이 발생하고, 그 원인(cause) 메시지에 `uk_holdings_user_stock`이 포함된다. 이 제약조건 이름을 기준으로 예외를 분기해 "이미 보유 중인 종목입니다" 같은 사용자 메시지를 매핑할 수 있다. 이는 워크플로우 문서 5단계의 `news_url` 유니크 제약 기준 중복 Skip 로직과 동일한 패턴이다.
-
-> **총자산 계산 예시**: `user_wallets.balance + SUM(user_holdings.quantity * 현재가(Redis 조회))`. v1처럼 `CASE WHEN stock_code='CASH'` 분기를 쓸 필요가 없어져 쿼리가 단순해짐.
-
 ---
 
-### ⑤ 유저 자동 매매 조건 테이블 (trading_conditions)
+### ⑤ 유저 자동 매매 조건 테이블 (trading_conditions) — v4 재편
 
-**역할**: 유저가 설정한 자동 매매 조건 저장. 가격 조건과 AI 점수 조건을 **동시에** 설정할 경우를 대비해 `condition_logic`(AND/OR)을 명시적으로 저장.
+**역할**: 조건 주문의 **액션(주문)** 부분만 담는 부모 테이블. "언제 발동할지"는 §⑤-1 `condition_triggers`로 분리한다. 실행 방식(`execution_mode`: AUTO/MANUAL)을 지원한다.
 
 | 컬럼명 | 타입 | 제약조건 | 설명 |
 |---|---|---|---|
-| condition_id | BIGINT | PK, AUTO_INCREMENT | 조건 식별 ID |
-| user_id | BIGINT | FK(users.user_id) | 조건 설정 유저 |
-| stock_code | VARCHAR(10) | FK(stocks.stock_code) | 대상 종목 |
-| target_price | DECIMAL(18,4) | NULL | 감시할 목표 가격 |
-| price_condition_type | VARCHAR(10) | NULL | ABOVE / BELOW |
-| target_ai_score | INT | NULL | 감시할 목표 AI 감성 점수 (0~100) |
-| ai_condition_type | VARCHAR(10) | NULL | ABOVE / BELOW |
-| **condition_logic** | **VARCHAR(3)** | **NOT NULL, DEFAULT 'AND'** | **가격 조건과 AI 점수 조건을 동시 설정 시 AND/OR 판단 기준 (v2 신규)** |
+| condition_id | BIGINT | PK, AUTO_INCREMENT | 조건(주문 액션) 식별 ID |
+| user_id | BIGINT | FK(users.user_id), NOT NULL | 조건 설정 유저 |
+| stock_code | VARCHAR(10) | FK(stocks.stock_code), NOT NULL | 대상 종목 |
 | order_type | VARCHAR(10) | NOT NULL | BUY / SELL |
 | order_quantity | INT | NOT NULL | 조건 충족 시 주문 수량 |
+| order_price_type | VARCHAR(10) | NOT NULL, DEFAULT 'MARKET' | MARKET / LIMIT |
+| limit_price | DECIMAL(18,4) | NULL | LIMIT 주문 시 지정가 (MARKET이면 NULL) |
+| condition_logic | VARCHAR(3) | NOT NULL, DEFAULT 'AND' | 복수 트리거 결합 기준 (AND/OR) |
+| **execution_mode** | **VARCHAR(10)** | **NOT NULL, DEFAULT 'AUTO'** | **AUTO (완전자동 체결) / MANUAL (반자동 승인 제안)** |
 | is_active | BOOLEAN | DEFAULT TRUE | 조건 감시 활성화 여부 |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 조건 생성 일시 |
-
-> `has_triggered` 컬럼은 v2에서 **제거**. 트리거 여부·재시도 관리는 `trading_histories.status`로 이전(§⑥ 참조). `is_active`만으로 "이 조건을 계속 감시할지"를 결정하며, 1회성 조건이 필요하면 애플리케이션 레벨에서 체결 성공 시 `is_active = FALSE`로 업데이트.
-
-> **v3 보완 — CHECK 제약 촘촘화**: v2의 `CHECK (target_price IS NOT NULL OR target_ai_score IS NOT NULL)`은 "가격 또는 AI 점수 중 하나는 입력되어야 한다"만 강제할 뿐, 예를 들어 `target_price`만 넣고 짝이 되는 `price_condition_type`(ABOVE/BELOW)을 비워도 통과된다. 이 상태로 워커가 `price_condition_type`을 읽으면 NULL을 만나 조건 평가 로직이 깨진다. 따라서 v3는 "값-타입 쌍" 단위로 CHECK를 재정의해, 가격 조건을 쓰려면 `target_price`와 `price_condition_type`이 함께 있어야 하고, AI 점수 조건을 쓰려면 `target_ai_score`와 `ai_condition_type`이 함께 있어야 하도록 DB 레벨에서 강제한다.
->
-> ⚠️ MySQL은 8.0.16 이전 버전에서 `CHECK` 제약을 파싱만 하고 실제로 강제하지 않는다(무시됨). 반드시 8.0.16 이상에서만 이 제약이 유효하므로, 개발/운영 환경의 MySQL 버전을 명확히 고정해야 한다(예: `mysql:8.4`).
+| **is_persistent** | **BOOLEAN** | **NOT NULL, DEFAULT FALSE** | **TRUE면 조건 충족/실행 후에도 is_active를 유지(반복 감시), FALSE(기본)면 1회 실행 후 자동 비활성화** |
+| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 생성 일시 |
+| updated_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP | 갱신 일시 |
 
 ```sql
 CREATE TABLE trading_conditions (
-    condition_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    stock_code VARCHAR(10) NOT NULL,
-    target_price DECIMAL(18,4) NULL,
-    price_condition_type VARCHAR(10) NULL COMMENT 'ABOVE, BELOW',
-    target_ai_score INT NULL,
-    ai_condition_type VARCHAR(10) NULL COMMENT 'ABOVE, BELOW',
-    condition_logic VARCHAR(3) NOT NULL DEFAULT 'AND' COMMENT 'AND, OR - 두 조건 동시 설정 시 판단 기준',
-    order_type VARCHAR(10) NOT NULL COMMENT 'BUY, SELL',
-    order_quantity INT NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    condition_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT NOT NULL,
+    stock_code       VARCHAR(10) NOT NULL,
+    order_type       VARCHAR(10) NOT NULL COMMENT 'BUY, SELL',
+    order_quantity   INT NOT NULL,
+    order_price_type VARCHAR(10) NOT NULL DEFAULT 'MARKET' COMMENT 'MARKET, LIMIT',
+    limit_price      DECIMAL(18,4) NULL,
+    condition_logic  VARCHAR(3) NOT NULL DEFAULT 'AND' COMMENT 'AND, OR',
+    execution_mode   VARCHAR(10) NOT NULL DEFAULT 'AUTO' COMMENT 'AUTO, MANUAL',
+    is_active        BOOLEAN DEFAULT TRUE,
+    is_persistent    BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'TRUE면 실행 후에도 반복 감시 유지',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (stock_code) REFERENCES stocks(stock_code),
-    CONSTRAINT chk_conditions_type_pair CHECK (
-        (target_price IS NOT NULL AND price_condition_type IS NOT NULL) OR
-        (target_ai_score IS NOT NULL AND ai_condition_type IS NOT NULL)
+    CONSTRAINT chk_conditions_order_type CHECK (order_type IN ('BUY','SELL')),
+    CONSTRAINT chk_conditions_order_price_type CHECK (order_price_type IN ('MARKET','LIMIT')),
+    CONSTRAINT chk_conditions_logic CHECK (condition_logic IN ('AND','OR')),
+    CONSTRAINT chk_conditions_execution_mode CHECK (execution_mode IN ('AUTO','MANUAL')),
+    CONSTRAINT chk_conditions_limit_price CHECK (
+        (order_price_type = 'LIMIT' AND limit_price IS NOT NULL) OR
+        (order_price_type = 'MARKET' AND limit_price IS NULL)
     )
 );
 ```
 
-> 애플리케이션 로직 예시:
-> - 가격 조건만 설정 → `condition_logic` 무시, 가격 조건만 평가.
-> - 가격+AI 점수 모두 설정, `condition_logic='AND'` → 두 조건 모두 만족해야 발동.
-> - 가격+AI 점수 모두 설정, `condition_logic='OR'` → 둘 중 하나만 만족해도 발동.
-> - 조건이 1개만 설정된 상태에서 `condition_logic='OR'`이 저장되어도 DB가 막지는 않는다(비교 대상이 하나뿐이라 의미가 없을 뿐 오류는 아님). 이 부분은 CHECK로 강제하기보다 애플리케이션/프론트엔드에서 "조건 1개 설정 시 `condition_logic` 입력 UI 비활성화"로 처리하는 편이 제약조건 복잡도 대비 실익이 크다.
+---
+
+### ⑤-1 유저 자동 매매 발동 조건 테이블 (condition_triggers) — v4 신규
+
+**역할**: 조건 주문의 **트리거(발동 조건)** 부분. 하나의 `trading_conditions`가 복수 개의 트리거를 가질 수 있으며(N:1), `condition_logic`에 따라 AND/OR로 결합된다.
+
+| 컬럼명 | 타입 | 제약조건 | 설명 |
+|---|---|---|---|
+| trigger_id | BIGINT | PK, AUTO_INCREMENT | 트리거 식별 ID |
+| condition_id | BIGINT | FK(trading_conditions.condition_id), NOT NULL, ON DELETE CASCADE | 소속 조건 |
+| trigger_type | VARCHAR(20) | NOT NULL | PRICE / PROFIT_TARGET / STOP_LOSS / TRAILING_STOP / AI_SCORE |
+| base_type | VARCHAR(20) | NOT NULL | 측정 기준: CURRENT_PRICE / AVG_PRICE / HIGHEST_PRICE / AI_SCORE |
+| compare_type | VARCHAR(10) | NOT NULL | ABOVE / BELOW |
+| target_value | DECIMAL(18,4) | NOT NULL | 목표값(절대가격 또는 %). `is_rate=TRUE`면 % |
+| is_rate | BOOLEAN | DEFAULT FALSE | `target_value`가 %인지 여부 |
+| trailing_highest | DECIMAL(18,4) | NULL | 트레일링 스탑의 추적 고점 (TRAILING_STOP 전용) |
+| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 생성 일시 |
+
+```sql
+CREATE TABLE condition_triggers (
+    trigger_id       BIGINT AUTO_INCREMENT PRIMARY KEY,
+    condition_id     BIGINT NOT NULL,
+    trigger_type     VARCHAR(20) NOT NULL COMMENT 'PRICE, PROFIT_TARGET, STOP_LOSS, TRAILING_STOP, AI_SCORE',
+    base_type        VARCHAR(20) NOT NULL COMMENT 'CURRENT_PRICE, AVG_PRICE, HIGHEST_PRICE, AI_SCORE',
+    compare_type     VARCHAR(10) NOT NULL COMMENT 'ABOVE, BELOW',
+    target_value     DECIMAL(18,4) NOT NULL,
+    is_rate          BOOLEAN DEFAULT FALSE COMMENT 'true면 target_value는 %',
+    trailing_highest DECIMAL(18,4) NULL COMMENT '트레일링 스탑 추적 고점',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (condition_id) REFERENCES trading_conditions(condition_id) ON DELETE CASCADE,
+    CONSTRAINT chk_triggers_trigger_type CHECK (trigger_type IN ('PRICE','PROFIT_TARGET','STOP_LOSS','TRAILING_STOP','AI_SCORE')),
+    CONSTRAINT chk_triggers_base_type CHECK (base_type IN ('CURRENT_PRICE','AVG_PRICE','HIGHEST_PRICE','AI_SCORE')),
+    CONSTRAINT chk_triggers_compare_type CHECK (compare_type IN ('ABOVE','BELOW')),
+    CONSTRAINT chk_triggers_trailing CHECK (
+        (trigger_type = 'TRAILING_STOP' AND trailing_highest IS NOT NULL) OR
+        (trigger_type <> 'TRAILING_STOP')
+    )
+);
+```
 
 ---
 
 ### ⑥ 매매/체결 히스토리 테이블 (trading_histories)
-
-**역할**: 실제 체결 내역(자동+수동)을 기록하는 영구 장부. v2에서는 `status` 필드를 추가해 주문의 생명주기(대기중/체결완료/실패)를 관리, 실패 시 재시도가 가능하도록 함.
-
-| 컬럼명 | 타입 | 제약조건 | 설명 |
-|---|---|---|---|
-| history_id | BIGINT | PK, AUTO_INCREMENT | 체결 이력 ID |
-| user_id | BIGINT | FK(users.user_id) | 주문 주체 유저 |
-| condition_id | BIGINT | FK(trading_conditions.condition_id), NULL | 발동 조건 (수동 매매는 NULL) |
-| stock_code | VARCHAR(10) | FK(stocks.stock_code) | 종목 코드 |
-| order_type | VARCHAR(10) | NOT NULL | BUY / SELL |
-| **status** | **VARCHAR(10)** | **NOT NULL, DEFAULT 'PENDING'** | **PENDING / FILLED / FAILED (v2 신규 — 기존 has_triggered 대체)** |
-| execution_price | DECIMAL(18,4) | NULL | 실제 체결 가격 (PENDING 상태에서는 NULL 가능) |
-| execution_quantity | INT | NULL | 실제 체결 수량 |
-| total_amount | DECIMAL(18,4) | NULL | 총 체결 금액 |
-| failure_reason | VARCHAR(255) | NULL | 실패 시 사유 (v2 신규) |
-| requested_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 주문 요청 일시 (v2 신규) |
-| executed_at | TIMESTAMP | NULL | 체결 완료 일시 |
 
 ```sql
 CREATE TABLE trading_histories (
@@ -253,27 +272,9 @@ CREATE TABLE trading_histories (
 );
 ```
 
-> **재시도 흐름 예시**: 조건 매칭 워커가 주문을 시도 → `status='PENDING'`으로 레코드 생성 → 체결 API 호출 → 성공 시 `status='FILLED'` + `executed_at` 갱신, 실패 시 `status='FAILED'` + `failure_reason` 기록 후 일정 시간 뒤 재시도 가능. 기존 `trading_conditions.has_triggered = TRUE` 방식은 실패해도 영구히 막혀버리는 문제가 있었으나, v2 구조는 `FAILED` 건에 대해 재주문 로직을 붙일 수 있음.
-
 ---
 
 ### ⑦ AI 뉴스 감성 분석 및 RAG 테이블 (news_sentiments)
-
-**역할**: 수집된 뉴스 요약 및 AI 분석 결과 저장. MySQL `VECTOR(1536)` 컬럼으로 임베딩 유사도 검색을 직접 수행 (별도 Vector DB 없음).
-
-| 컬럼명 | 타입 | 제약조건 | 설명 |
-|---|---|---|---|
-| news_id | BIGINT | PK, AUTO_INCREMENT | 뉴스 고유 ID |
-| stock_code | VARCHAR(10) | FK(stocks.stock_code) | 관련 종목 코드 |
-| news_url | VARCHAR(500) | `uk_news_url` UNIQUE, NOT NULL | 뉴스 원본 링크 (중복 수집 방지 키, 제약조건 이름 명시 — v3) |
-| title | VARCHAR(255) | NOT NULL | 뉴스 제목 |
-| **content_summary** | **TEXT** | **NOT NULL** | **네이버 뉴스 API `description` 필드 (요약, 통상 100~200자). 본문 전체 아님 (v2 정정)** |
-| sentiment | VARCHAR(10) | NOT NULL | AI 감성 결과 (GOOD/BAD/NEUTRAL) |
-| ai_score | INT | NOT NULL | AI가 매긴 호재 점수 (0~100) |
-| ai_reason | TEXT | NULL | AI가 해당 점수를 준 요약 이유 |
-| published_at | TIMESTAMP | NOT NULL | 뉴스 원 발행 시간 |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 시스템 수집 일시 |
-| embedding | VECTOR(1536) | NULL | OpenAI 임베딩 벡터 (RAG 검색용, MySQL 네이티브 VECTOR 타입) |
 
 ```sql
 CREATE TABLE news_sentiments (
@@ -281,7 +282,7 @@ CREATE TABLE news_sentiments (
     stock_code VARCHAR(10) NOT NULL,
     news_url VARCHAR(500) NOT NULL,
     title VARCHAR(255) NOT NULL,
-    content_summary TEXT NOT NULL COMMENT '네이버 뉴스 API description 필드 - 요약이며 본문 전체 아님',
+    content_summary TEXT NOT NULL COMMENT '네이버 뉴스 API description 필드 - 요약',
     sentiment VARCHAR(10) NOT NULL COMMENT 'GOOD, BAD, NEUTRAL',
     ai_score INT NOT NULL,
     ai_reason TEXT NULL,
@@ -289,27 +290,13 @@ CREATE TABLE news_sentiments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     embedding VECTOR(1536) NULL,
     CONSTRAINT uk_news_url UNIQUE (news_url),
-    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code),
-    VECTOR INDEX idx_embedding (embedding)
+    FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
 );
 ```
-
-> **JPA/예외 핸들링 활용 예시**: 스케줄러가 이미 수집된 `news_url`로 재삽입을 시도하면 `uk_news_url` 제약 위반 예외가 발생한다. 이 이름을 기준으로 "이미 수집된 기사이므로 Skip" 로직을 명확히 분기할 수 있다 (워크플로우 문서 5단계 언급 내용과 동일 패턴).
-
-> `VECTOR INDEX` 문법은 MySQL 버전 및 벤더별로 차이가 있을 수 있으므로, 실제 구축 시 사용 중인 MySQL 버전의 벡터 인덱스 지원 여부와 정확한 DDL 문법을 별도 확인 필요.
 
 ---
 
 ### ⑧ AI 투자 맞춤 리포트 테이블 (ai_investment_reports)
-
-**역할**: RabbitMQ Worker가 RAG 파이프라인을 거쳐 생성한 유저별 맞춤 리포트 본문을 영구 저장.
-
-| 컬럼명 | 타입 | 제약조건 | 설명 |
-|---|---|---|---|
-| report_id | BIGINT | PK, AUTO_INCREMENT | 리포트 식별 ID |
-| user_id | BIGINT | FK(users.user_id) | 리포트 수신 유저 |
-| report_content | TEXT | NOT NULL | AI 생성 리포트 본문 (JSON 포맷 — title, recent, opinion, avgScore, good, bad, neutral, createdAt) |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 리포트 생성 일시 |
 
 ```sql
 CREATE TABLE ai_investment_reports (
@@ -323,7 +310,7 @@ CREATE TABLE ai_investment_reports (
 
 ---
 
-## 3. 전체 DDL 통합본 (실행 순서 고려)
+## 3. 전체 DDL 통합본
 
 ```sql
 -- 1. 기준 테이블
@@ -345,7 +332,7 @@ CREATE TABLE stocks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. 자산 관련 (분리된 구조)
+-- 2. 자산 관련
 CREATE TABLE user_wallets (
     wallet_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -367,27 +354,55 @@ CREATE TABLE user_holdings (
     FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
 );
 
--- 3. 매매 조건 및 이력
+-- 3. 매매 조건(액션) 및 발동 조건(트리거)
 CREATE TABLE trading_conditions (
-    condition_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    stock_code VARCHAR(10) NOT NULL,
-    target_price DECIMAL(18,4) NULL,
-    price_condition_type VARCHAR(10) NULL COMMENT 'ABOVE, BELOW',
-    target_ai_score INT NULL,
-    ai_condition_type VARCHAR(10) NULL COMMENT 'ABOVE, BELOW',
-    condition_logic VARCHAR(3) NOT NULL DEFAULT 'AND' COMMENT 'AND, OR',
-    order_type VARCHAR(10) NOT NULL COMMENT 'BUY, SELL',
-    order_quantity INT NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    condition_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT NOT NULL,
+    stock_code       VARCHAR(10) NOT NULL,
+    order_type       VARCHAR(10) NOT NULL COMMENT 'BUY, SELL',
+    order_quantity   INT NOT NULL,
+    order_price_type VARCHAR(10) NOT NULL DEFAULT 'MARKET' COMMENT 'MARKET, LIMIT',
+    limit_price      DECIMAL(18,4) NULL,
+    condition_logic  VARCHAR(3) NOT NULL DEFAULT 'AND' COMMENT 'AND, OR',
+    execution_mode   VARCHAR(10) NOT NULL DEFAULT 'AUTO' COMMENT 'AUTO, MANUAL',
+    is_active        BOOLEAN DEFAULT TRUE,
+    is_persistent    BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'TRUE면 실행 후에도 반복 감시 유지',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (stock_code) REFERENCES stocks(stock_code),
-    CONSTRAINT chk_conditions_type_pair CHECK (
-        (target_price IS NOT NULL AND price_condition_type IS NOT NULL) OR
-        (target_ai_score IS NOT NULL AND ai_condition_type IS NOT NULL)
+    CONSTRAINT chk_conditions_order_type CHECK (order_type IN ('BUY','SELL')),
+    CONSTRAINT chk_conditions_order_price_type CHECK (order_price_type IN ('MARKET','LIMIT')),
+    CONSTRAINT chk_conditions_logic CHECK (condition_logic IN ('AND','OR')),
+    CONSTRAINT chk_conditions_execution_mode CHECK (execution_mode IN ('AUTO','MANUAL')),
+    CONSTRAINT chk_conditions_limit_price CHECK (
+        (order_price_type = 'LIMIT' AND limit_price IS NOT NULL) OR
+        (order_price_type = 'MARKET' AND limit_price IS NULL)
     )
 );
+
+CREATE TABLE condition_triggers (
+    trigger_id       BIGINT AUTO_INCREMENT PRIMARY KEY,
+    condition_id     BIGINT NOT NULL,
+    trigger_type     VARCHAR(20) NOT NULL COMMENT 'PRICE, PROFIT_TARGET, STOP_LOSS, TRAILING_STOP, AI_SCORE',
+    base_type        VARCHAR(20) NOT NULL COMMENT 'CURRENT_PRICE, AVG_PRICE, HIGHEST_PRICE, AI_SCORE',
+    compare_type     VARCHAR(10) NOT NULL COMMENT 'ABOVE, BELOW',
+    target_value     DECIMAL(18,4) NOT NULL,
+    is_rate          BOOLEAN DEFAULT FALSE COMMENT 'true면 target_value는 %',
+    trailing_highest DECIMAL(18,4) NULL COMMENT '트레일링 스탑 추적 고점',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (condition_id) REFERENCES trading_conditions(condition_id) ON DELETE CASCADE,
+    CONSTRAINT chk_triggers_trigger_type CHECK (trigger_type IN ('PRICE','PROFIT_TARGET','STOP_LOSS','TRAILING_STOP','AI_SCORE')),
+    CONSTRAINT chk_triggers_base_type CHECK (base_type IN ('CURRENT_PRICE','AVG_PRICE','HIGHEST_PRICE','AI_SCORE')),
+    CONSTRAINT chk_triggers_compare_type CHECK (compare_type IN ('ABOVE','BELOW')),
+    CONSTRAINT chk_triggers_trailing CHECK (
+        (trigger_type = 'TRAILING_STOP' AND trailing_highest IS NOT NULL) OR
+        (trigger_type <> 'TRAILING_STOP')
+    )
+);
+
+CREATE INDEX idx_conditions_user_active ON trading_conditions(user_id, is_active);
+CREATE INDEX idx_triggers_condition ON condition_triggers(condition_id);
 
 CREATE TABLE trading_histories (
     history_id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -432,22 +447,3 @@ CREATE TABLE ai_investment_reports (
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 ```
-
-> 벡터 인덱스(`VECTOR INDEX`) 구문은 사용 중인 MySQL 버전에 따라 문법이 다를 수 있어 통합 DDL에서는 제외했습니다. 실제 구축 단계에서 버전을 확정한 뒤 인덱스 구문을 추가하는 것을 권장합니다.
->
-> 위 CHECK 제약(`chk_conditions_type_pair`)은 MySQL 8.0.16 이상에서만 실제로 강제됩니다. 그 이전 버전에서는 파싱만 되고 무시되므로 반드시 버전을 확인하세요.
-
----
-
-## 4. 버전별 변경 요약표
-
-| 구분 | v1 | v2 | v3 |
-|---|---|---|---|
-| 자산 테이블 | `user_assets` 1개 (현금/주식 폴리모픽) | `user_wallets` + `user_holdings` 2개로 분리 | (유지) |
-| 매매조건 로직 | 없음 (암묵적) | `condition_logic`(AND/OR) 명시 | (유지) |
-| 주문 상태 | `has_triggered` boolean | `trading_histories.status`(PENDING/FILLED/FAILED) | (유지) |
-| 실패 처리 | 불가 (영구 잠김) | `failure_reason` 기록 + 재시도 가능 | (유지) |
-| 뉴스 콘텐츠 | `content`(본문 전제) | `content_summary`(요약, 실제 API 스펙 반영) | (유지) |
-| 벡터 저장소 | Chroma/Pinecone 언급 혼재 | MySQL `VECTOR(1536)` 단일화 | (유지) |
-| `trading_conditions` CHECK | - | `target_price OR target_ai_score IS NOT NULL`만 강제 (타입 컬럼 누락 허용됨) | 값-타입 쌍 단위로 강제 (`chk_conditions_type_pair`) |
-| 제약조건 이름 | - | 일부만 명명(`uk_provider`, `uk_user_stock`) | 전 테이블 `uk_`/`chk_` 컨벤션으로 통일, JPA 예외 핸들링 대비 |

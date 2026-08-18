@@ -82,15 +82,22 @@
 - 동일 텍스트를 OpenAI 임베딩 API로 전달 → 1,536차원 벡터 수신 → MySQL `embedding VECTOR(1536)` 컬럼에 저장.
 - 결과를 Redis(단기)와 MySQL(영구)에 저장.
 
-### 7단계 — 조건 매칭 및 웹소켓(사용자 알림) 구현
+### 7단계 — 조건 매칭 및 웹소켓(사용자 알림) 구현 (v4)
 
 - Socket.io 또는 NestJS/Spring WebSocket으로 사용자용 소켓 서버 오픈. 연결 시 JWT로 사용자 식별.
-- 백엔드 워커가 Redis(4단계 시세)와 6단계(AI 감성 점수)를 모니터링.
-- `trading_conditions`의 조건과 일치하면:
-  1. 사용자에게 실시간 알림 전송.
-  2. `condition_logic`(AND/OR)에 따라 가격 조건·AI 점수 조건 평가.
-  3. 조건 충족 시 모의투자 주문 로직 호출 → 체결 시도.
-  4. 주문 결과는 `status`(PENDING/FILLED/FAILED)로 관리하여 재시도 가능하도록 처리 (기존 `has_triggered` boolean 방식 폐기).
+- **조건 주문 모델**: `trading_conditions`(액션) + `condition_triggers`(트리거, 1:N) 분리 구조. (database.md v4)
+- **트리거 방식**: KIS WebSocket 실시간 시세 수신 → `PriceUpdatedEvent` 발행 → `ConditionMatchingEngine`이 해당 종목의 활성 조건 평가.
+- 조건 평가 로직:
+  1. 종목 기준 활성 조건 조회 (`is_active = TRUE`).
+  2. 각 트리거의 `base_type`별 기준값 조회:
+     - `CURRENT_PRICE` → Redis `price:{code}:current`
+     - `AVG_PRICE` → `user_holdings.average_price`
+     - `HIGHEST_PRICE` → `condition_triggers.trailing_highest` (시세 상승 시 갱신)
+     - `AI_SCORE` → `news_sentiments` 최신 `ai_score`
+  3. `is_rate=TRUE`면 `기준값 × (1 + target/100)` 환산 후 `compare_type`(ABOVE/BELOW) 비교.
+  4. `condition_logic`(AND/OR)으로 복수 트리거 결합.
+  5. 충족 시 → `rate:order:lock`(Redis) 2차 방어 → KIS 주문 → `trading_histories` 기록.
+  6. `is_persistent = FALSE`(기본, 1회성) 조건은 `is_active = FALSE`로 비활성화. `is_persistent = TRUE`(반복 감시) 조건은 실행 후에도 `is_active = TRUE`를 유지해 계속 감시한다 (주문 `status`는 PENDING/FILLED/FAILED로 관리, 기존 `has_triggered` boolean 방식 폐기).
 
 ### 8단계 — RAG 리포트 구현
 

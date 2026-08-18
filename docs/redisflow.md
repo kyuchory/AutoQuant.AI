@@ -136,7 +136,7 @@ Value : "locked"
 자료구조: String (SET ... NX EX 4)
 TTL   : 4초
 ```
-- 조건 매칭 워커가 주문을 시도하기 직전 `SET rate:order:lock:{userId}:{stockCode} locked NX EX 4`로 락 획득을 시도한다.
+- `ConditionMatchingEngine.execute()`가 주문을 시도하기 직전 `SET rate:order:lock:{userId}:{stockCode} locked NX EX 4`로 락 획득을 시도한다. (RedisKeys.rateOrderLock(userId, stockCode) 사용 — v4)
 - 락 획득 실패(이미 존재) → 해당 주문 시도는 스킵(동시 중복 주문 방지).
 - **이 락은 무한매수 방지의 2차 방어선이다.** 1차 방어선은 `trading_conditions.is_active`를 체결 성공 시 `FALSE`로 전환하는 로직이며, 이 락은 "같은 순간에 여러 워커/스레드가 동시에 같은 조건을 처리하는 경우"만 방지한다. `is_active` 전환 로직이 실패하거나 지연되는 경우까지 이 락 하나로 막을 수는 없으므로, 두 로직을 항상 함께 구현한다.
 

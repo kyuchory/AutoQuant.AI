@@ -39,7 +39,7 @@ Spring Boot의 표준 레이어드 및 도메인 기반 패키지 패턴을 엄�
 **2.5. Data Transfer Object (.dto)**
 - 역할: 레이어 간 데이터 전송을 위한 불변(Immutable) 객체.
 - 규칙: record 키워드 사용을 절대 원칙으로 하며, Inner Class 구조를 활용하여 하나의 파일 안에서 Request와 Response를 묶어서 관리한다.
-- **[v2] `TradingConditionRequest`는 `targetPrice`, `priceConditionType`, `targetAiScore`, `aiConditionType`, `conditionLogic`(AND/OR) 필드를 모두 포함한다.** DB의 `chk_conditions_type_pair` CHECK 제약과 동일한 규칙(가격 조건을 쓰려면 `targetPrice`+`priceConditionType`이 함께 있어야 하고, AI 점수 조건을 쓰려면 `targetAiScore`+`aiConditionType`이 함께 있어야 함)을 `@AssertTrue` 커스텀 검증 메서드로 DTO 레벨에서도 먼저 걸러낸다. DB CHECK 위반으로 인한 500 에러가 사용자에게 그대로 노출되지 않도록, 애플리케이션단 검증을 1차 방어선으로 둔다.
+- **[v4] `TradingConditionRequest`는 "액션" 필드(`stockCode`, `orderType`, `orderQuantity`, `orderPriceType`, `limitPrice`, `conditionLogic`)와 `List<TriggerRequest> triggers`(발동 조건 1:N)를 포함한다.** 각 `TriggerRequest`는 `triggerType`(PRICE/PROFIT_TARGET/STOP_LOSS/TRAILING_STOP/AI_SCORE), `baseType`(CURRENT_PRICE/AVG_PRICE/HIGHEST_PRICE/AI_SCORE), `compareType`(ABOVE/BELOW), `targetValue`, `isRate`로 구성된다. 값-타입 쌍 검증(예: LIMIT 주문이면 `limitPrice` 필수, 트레일링 스탑이면 `baseType=HIGHEST_PRICE`+`compareType=BELOW`+`isRate=true`)을 `@Valid` + 커스텀 검증 메서드로 1차 방어선으로 둔다. DB CHECK 위반으로 인한 500 에러가 사용자에게 그대로 노출되지 않도록 한다.
 
 **2.6. Global Error Layer (global/error)**
 - 역할: 애플리케이션 전역에서 발생하는 예외 통합 관리.
@@ -51,7 +51,9 @@ Spring Boot의 표준 레이어드 및 도메인 기반 패키지 패턴을 엄�
 | `uk_holdings_user_stock` | `DuplicateHoldingException` | "이미 보유 중인 종목입니다." |
 | `uk_news_url` | (내부 로직에서 Skip 처리, 예외로 노출하지 않음) | - |
 | `uk_users_email` | `DuplicateEmailException` | "이미 가입된 이메일입니다." |
-| `chk_conditions_type_pair` | `InvalidConditionException` | "조건 값과 조건 타입을 함께 입력해야 합니다." |
+| `chk_conditions_order_price_type` | `InvalidConditionException` | "주문 방식은 MARKET 또는 LIMIT이어야 합니다." |
+| `chk_conditions_limit_price` | `InvalidConditionException` | "지정가(LIMIT) 주문은 limitPrice를 입력해야 합니다." |
+| `chk_triggers_trigger_type` / `chk_triggers_base_type` / `chk_triggers_compare_type` / `chk_triggers_trailing` | `InvalidTriggerException` | "유효하지 않은 트리거 유형입니다." |
 
 ---
 
@@ -124,10 +126,11 @@ URI는 복수형 명사를 사용하며 소문자로 작성한다. 버전 식별
 - POST /api/v1/assets/orders : 수동 매매 주문. 응답 시 생성된 `TradingHistory`의 `status`(PENDING → 체결 결과에 따라 FILLED/FAILED)를 포함한다.
 - **자동 매매는 조건 매칭 워커(KIS Websocket 이벤트 리스너 + Redis/MySQL 조건 평가)에 의해 트리거되며, 별도 스케줄러(polling)로 구현하지 않는다.**
 
-**5.3. 실시간 알림 및 자동 매매 조건 설정 (Conditions) [v2 수정]**
-- POST /api/v1/conditions : 유저 맞춤 주가/AI 스코어 자동 매매 감시 조건 등록. **요청 DTO는 `targetPrice`, `priceConditionType`, `targetAiScore`, `aiConditionType`, `conditionLogic`(AND/OR)을 포함하며, §2.5의 값-타입 쌍 검증을 통과해야 한다.**
+**5.3. 실시간 알림 및 자동 매매 조건 설정 (Conditions) [v4 수정]**
+- POST /api/v1/conditions : 유저 맞춤 자동 매매 감시 조건 등록. **요청 DTO는 액션(`stockCode`, `orderType`, `orderQuantity`, `orderPriceType`, `limitPrice`, `conditionLogic`, `isPersistent`) + `triggers[]`(발동 조건 1:N) 구조이며, §2.5의 트리거 값-타입 검증을 통과해야 한다. `isPersistent=false`(기본)는 1회성 조건으로 실행 후 `is_active=false`, `isPersistent=true`는 실행 후에도 `is_active=true`를 유지하는 반복 감시 조건이다.**
 - GET /api/v1/conditions : 내가 설정한 조건 목록 조회 (JWT의 userId 기반)
 - DELETE /api/v1/conditions/{conditionId} : 특정 알림/매매 조건 삭제
+- [v4] 조건 매칭은 KIS WebSocket 시세 이벤트(`PriceUpdatedEvent`) 기반 `ConditionMatchingEngine`이 수행. 트리거의 `baseType`(CURRENT_PRICE/AVG_PRICE/HIGHEST_PRICE/AI_SCORE)별 기준값을 조회해 `compareType`+`targetValue`+`isRate`로 비교, `conditionLogic`(AND/OR)으로 결합. 충족 시 `rate:order:lock`(Redis) 2차 방어 후 주문.
 
 **5.4. AI 투자 리포트 및 RAG (Reports)**
 - GET /api/v1/reports/stocks/{stockCode} : 특정 종목의 AI 최신 투자 리포트 조회 (Redis 캐시 우선 조회전략 적용)
@@ -224,7 +227,7 @@ interface LanguageState {
 - 이 store는 `authStore`/`assetStore`와 별개로, 다국어 처리(i18n) 전용으로 예외적으로 허용된 store이다.
 - **언어 설정 변경 시 `I18nProvider`가 감지하여 `i18next.changeLanguage()`를 호출한다.**
 
-**Store 4 (예외): `lib/store/chartStore.ts` — 실시간 시세 (KIS WebSocket PRICE_ALERT) [v5 신규]**
+**Store 4 (예외): `lib/store/chartStore.ts` — 실시간 시세 (KIS WebSocket PRICE_TICK) [v5 신규, v8에서 이벤트명 분리]**
 
 ```typescript
 interface PriceData {
@@ -238,10 +241,26 @@ interface ChartState {
 }
 ```
 
-- KIS WebSocket이 push하는 실시간 체결가(PRICE_ALERT)를 `socketClient.ts` → `useChartStore.getState().updatePrice()` 로 수신한다. `changeRate`는 KIS 전일대비 등락률(fields[5])을 그대로 사용한다.
+- KIS WebSocket이 push하는 실시간 체결가(PRICE_TICK)를 `socketClient.ts` → `useChartStore.getState().updatePrice()` 로 수신한다. `changeRate`는 KIS 전일대비 등락률(fields[5])을 그대로 사용한다.
 - `StockSidebar`(사이드바 현재가+전일대비 등락률)와 `CandleChart`(캔들차트 실시간 업데이트)가 이 store를 구독한다.
 - 이 store는 `authStore`/`assetStore`와 별개로, KIS 실시간 시세(WebSocket 전용 데이터) 처리를 위해 허용된 store이다.
-- **추가 사유**: WebSocket PRICE_ALERT 페이로드에는 `conditionId`가 없고 순수 시세 정보(stockCode + currentPrice)만 포함된다. assetStore는 보유 종목만 관리하므로, 10종목 전체 시세를 관리할 별도 store가 필요했다.
+- **추가 사유**: WebSocket PRICE_TICK 페이로드에는 `conditionId`가 없고 순수 시세 정보(stockCode + currentPrice)만 포함된다. assetStore는 보유 종목만 관리하므로, 10종목 전체 시세를 관리할 별도 store가 필요했다.
+- **[v8] `PRICE_TICK` vs `PRICE_ALERT` 분리**: 초당 전체 종목 시세 브로드캐스트는 `PRICE_TICK`, 사용자가 설정한 가격 조건이 실제로 충족되어 `ConditionMatchingEngine`이 보내는 1회성 알림은 `PRICE_ALERT`(`conditionId` 포함, api.md §6.2)로 이름을 분리한다. 두 이벤트가 이름을 공유하면 조건 발동 알림이 시세 틱에 묻혀 사용자에게 전달되지 않는다.
+
+**Store 6 (예외): `lib/store/orderProposalStore.ts` — 실시간 반자동 매매 제안 모달 [v7 신규]**
+
+```typescript
+interface OrderProposalState {
+  proposal: OrderProposalPayload | null
+  isOpen: boolean
+  openProposal: (payload: OrderProposalPayload) => void
+  closeProposal: () => void
+}
+```
+
+- WebSocket `ORDER_PROPOSAL` 이벤트 수신 시 `socketClient.ts` → `useOrderProposalStore.getState().openProposal()` 로 모달 상태를 관리한다.
+- `OrderProposalModal` 컴포넌트가 이 store를 구독해 어느 화면에서나 실시간 AI 근거/뉴스 발행시각 포함 매매 제안 팝업을 띄운다.
+- **추가 사유**: 매매 제안은 WebSocket 전용 실시간 데이터이며, 컴포넌트 바깥(`socketClient.ts`)에서 수신하므로 Zustand store를 통한 상태 전달이 필수적이다.
 
 **Store 5 (예외): `lib/store/executionStore.ts` — 실시간 체결 내역 (KIS WebSocket EXECUTION) [v6 신규]**
 
@@ -292,7 +311,7 @@ src/app/
 
 - `lib/socket/socketClient.ts`에서 연결·재연결·이벤트 핸들링을 전담한다.
 - 이벤트 수신 시 직접 컴포넌트 상태를 건드리지 않고 반드시 Zustand store 액션을 통해 상태를 변경한다.
-- 이벤트 타입 상수는 `lib/socket/socketEvents.ts`에 고정한다: `PRICE_ALERT`, `AI_SCORE_ALERT`, `ORDER_FILLED`, `ORDER_FAILED`, `REPORT_READY`, `EXECUTION`
+- 이벤트 타입 상수는 `lib/socket/socketEvents.ts`에 고정한다: `PRICE_TICK`, `PRICE_ALERT`, `AI_SCORE_ALERT`, `ORDER_FILLED`, `ORDER_FAILED`, `REPORT_READY`, `EXECUTION`, `ORDER_PROPOSAL`
 
 **7.6. 타입 정의 규칙**
 

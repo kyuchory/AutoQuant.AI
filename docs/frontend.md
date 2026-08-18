@@ -34,8 +34,10 @@ front/src/
 │   │   ├── layout.tsx                 ← AuthProvider + 네비게이션 공통 레이아웃
 │   │   ├── dashboard/
 │   │   │   └── page.tsx               ← 자산현황 + 대장주 10종목 + WS 실시간
+│   │   ├── portfolio/
+│   │   │   └── page.tsx               ← 포트폴리오 (총자산·예수금·보유종목·평가손익 + 자동 매도 모달)
 │   │   ├── conditions/
-│   │   │   └── page.tsx               ← 자동매매 조건 관리 + 매매이력
+│   │   │   └── page.tsx               ← IF-THEN 블록 빌더 + 프리셋 + 감시 현황판(ON/OFF)
 │   │   └── reports/
 │   │       └── [stockCode]/
 │   │           └── page.tsx           ← AI 리포트 조회/새로고침
@@ -43,7 +45,7 @@ front/src/
 │   └── page.tsx                       ← / → /dashboard 리다이렉트
 │
 ├── components/
-│   ├── common/                        ← 버튼, 모달, 토스트, 로딩 스피너
+│   ├── common/                        ← 버튼, 모달, 토스트, 로딩 스피너, OrderProposalModal (반자동 제안 모달)
 │   ├── auth/
 │   │   └── AuthProvider.tsx           ← 탭 재접속 시 accessToken 자동 복구
 │   ├── assets/                        ← 자산 카드, 보유종목 테이블, 종목 카드
@@ -53,7 +55,7 @@ front/src/
 │       ├── CandleChart.tsx            ← 캔들 차트
 │       ├── NewsTicker.tsx             ← 뉴스 티커
 │       ├── StockSidebar.tsx           ← 종목 사이드바
-│       ├── TradingPanel.tsx           ← 매수/매도 패널 (시장가/지정가, 수량, 비율 버튼)
+│       ├── TradingPanel.tsx           ← 매수/매도 패널 (시장가/지정가/스탑·자동 3탭, 수량, 비율 버튼)
 │       └── ExecutionList.tsx          ← 실시간 체결 내역 테이블 (체결가/체결량(매수:빨강/매도:파랑)/등락률/누적거래량/시간)
 │
 ├── lib/
@@ -62,13 +64,17 @@ front/src/
 │   │   ├── auth.ts                    ← login / logout
 │   │   ├── assets.ts                  ← getAssets / createOrder / getHistories
 │   │   ├── conditions.ts              ← getConditions / createCondition / deleteCondition
-│   │   └── reports.ts                 ← getReport / refreshReport
+│   │   ├── reports.ts                 ← getReport / refreshReport
+│   │   ├── news.ts                    ← getNewsTicker
+│   │   ├── charts.ts                  ← getDailyChart / getMinuteChart
+│   │   └── stocks.ts                  ← getStocks
 │   ├── socket/
 │   │   ├── socketClient.ts            ← WebSocket 연결·재연결·이벤트 핸들링
 │   │   └── socketEvents.ts            ← 이벤트 타입 상수
 │   ├── store/
 │   │   ├── authStore.ts               ← accessToken + user (Zustand)
-│   │   └── assetStore.ts              ← 자산 현황 + WS 실시간 갱신 (Zustand)
+│   │   ├── assetStore.ts              ← 자산 현황 + WS 실시간 갱신 (Zustand)
+│   │   └── orderProposalStore.ts      ← 실시간 반자동 매매 제안 모달 (Zustand)
 │   ├── hooks/
 │   │   ├── useAuth.ts                 ← 로그인 상태 + 카카오 로그인 + 로그아웃
 │   │   ├── useWebSocket.ts            ← WS 연결 훅 (컴포넌트에서 사용)
@@ -82,6 +88,8 @@ front/src/
 │   ├── assets.ts                      ← WalletDto, HoldingDto, OrderDto, HistoryDto
 │   ├── conditions.ts                  ← TradingConditionDto, ConditionRequest
 │   ├── reports.ts                     ← ReportDto
+│   ├── news.ts                        ← NewsTickerDto
+│   ├── stocks.ts                      ← StockInfo
 │   └── socket.ts                      ← WS 이벤트 페이로드 타입
 │
 └── middleware.ts                      ← 보호 라우트 가드 (refreshToken 쿠키 판별)
@@ -242,7 +250,7 @@ assetStore 상태 변경
 | 액션 | 호출 시점 | 호출 주체 |
 |---|---|---|
 | `setAssets` | `GET /assets` 응답 수신 | `lib/hooks/useAssets.ts` |
-| `updateHoldingPrice` | WS `PRICE_ALERT` 이벤트 | `lib/socket/socketClient.ts` |
+| `updateHoldingPrice` | WS `PRICE_TICK` 이벤트 | `lib/socket/socketClient.ts` |
 | `applyOrderFilled` | WS `ORDER_FILLED` 이벤트 | `lib/socket/socketClient.ts` |
 
 ---
@@ -301,12 +309,14 @@ API 요청 → 401 수신
 
 ```typescript
 export const SOCKET_EVENTS = {
+  PRICE_TICK: 'PRICE_TICK',
   PRICE_ALERT: 'PRICE_ALERT',
   AI_SCORE_ALERT: 'AI_SCORE_ALERT',
   ORDER_FILLED: 'ORDER_FILLED',
   ORDER_FAILED: 'ORDER_FAILED',
   REPORT_READY: 'REPORT_READY',
   EXECUTION: 'EXECUTION',
+  ORDER_PROPOSAL: 'ORDER_PROPOSAL',
 } as const
 ```
 
@@ -314,12 +324,14 @@ export const SOCKET_EVENTS = {
 
 | 이벤트 | payload | 처리 |
 |---|---|---|
-| `PRICE_ALERT` | `{ conditionId, stockCode, currentPrice }` | 토스트 알림 표시 |
-| `AI_SCORE_ALERT` | `{ conditionId, stockCode, aiScore }` | 토스트 알림 표시 |
+| `PRICE_TICK` | `{ stockCode, currentPrice, changeRate }` | `assetStore.updateHoldingPrice` + `chartStore.updatePrice` (전체 종목 시세 갱신, conditionId 없음) |
+| `PRICE_ALERT` | `{ conditionId, stockCode, currentPrice }` | 토스트 알림 표시 (TODO: 토스트 컴포넌트 미구현, 현재 콘솔 로그로만 노출) |
+| `AI_SCORE_ALERT` | `{ conditionId, stockCode, aiScore }` | 토스트 알림 표시 (TODO: 토스트 컴포넌트 미구현, 현재 콘솔 로그로만 노출) |
 | `ORDER_FILLED` | `{ historyId, stockCode, executionPrice, executionQuantity }` | 토스트 + `assetStore.applyOrderFilled()` |
-| `ORDER_FAILED` | `{ historyId, stockCode, failureReason }` | 토스트 알림 표시 |
+| `ORDER_FAILED` | `{ historyId, stockCode, failureReason }` | 토스트 알림 표시 (TODO: 토스트 컴포넌트 미구현, 현재 콘솔 로그로만 노출) |
 | `REPORT_READY` | `{ stockCode, reportId }` | 해당 stockCode 리포트 페이지 자동 재조회 |
 | `EXECUTION` | `{ stockCode, price, volume, changeRate, accumulatedVolume, time }` | executionStore.pushExecution() → ExecutionList 실시간 갱신 |
+| `ORDER_PROPOSAL` | `{ conditionId, stockCode, stockName, orderType, orderQuantity, currentPrice, aiScore, aiReason, newsTitle, newsPublishedAt... }` | orderProposalStore.openProposal() → OrderProposalModal 팝업 오픈 |
 
 ### 5.3 연결 규칙
 
@@ -395,28 +407,46 @@ export interface HistoryDto {
 
 ### `types/conditions.ts`
 ```typescript
-export interface TradingConditionDto {
+export type TriggerType = 'PRICE' | 'PROFIT_TARGET' | 'STOP_LOSS' | 'TRAILING_STOP' | 'AI_SCORE'
+export type BaseType = 'CURRENT_PRICE' | 'AVG_PRICE' | 'HIGHEST_PRICE' | 'AI_SCORE'
+export type CompareType = 'ABOVE' | 'BELOW'
+
+export interface TriggerRequest {
+  triggerType: TriggerType
+  baseType: BaseType
+  compareType: CompareType
+  targetValue: number
+  isRate?: boolean
+}
+export interface TradingConditionRequest {
+  stockCode: string
+  orderType: 'BUY' | 'SELL'
+  orderQuantity: number
+  orderPriceType?: 'MARKET' | 'LIMIT'
+  limitPrice?: number
+  conditionLogic?: 'AND' | 'OR'
+  triggers: TriggerRequest[]
+}
+export interface TriggerResponse {
+  triggerId: number
+  triggerType: TriggerType
+  baseType: BaseType
+  compareType: CompareType
+  targetValue: number
+  isRate: boolean
+  trailingHighest: number | null
+}
+export interface TradingConditionResponse {
   conditionId: number
   stockCode: string
-  targetPrice: number | null
-  priceConditionType: 'ABOVE' | 'BELOW' | null
-  targetAiScore: number | null
-  aiConditionType: 'ABOVE' | 'BELOW' | null
-  conditionLogic: 'AND' | 'OR'
   orderType: 'BUY' | 'SELL'
   orderQuantity: number
+  orderPriceType: 'MARKET' | 'LIMIT'
+  limitPrice: number | null
+  conditionLogic: 'AND' | 'OR'
   isActive: boolean
+  triggers: TriggerResponse[]
   createdAt: string
-}
-export interface ConditionRequest {
-  stockCode: string
-  targetPrice?: number
-  priceConditionType?: 'ABOVE' | 'BELOW'
-  targetAiScore?: number
-  aiConditionType?: 'ABOVE' | 'BELOW'
-  conditionLogic: 'AND' | 'OR'
-  orderType: 'BUY' | 'SELL'
-  orderQuantity: number
 }
 ```
 
@@ -451,7 +481,7 @@ export interface ReportReadyPayload {
 |---|---|---|---|
 | `/login` | - | OAuth 리다이렉트 | - |
 | `/callback/kakao` | POST /auth/login | - | - |
-| `/dashboard` | GET /assets | POST /assets/orders | PRICE_ALERT, ORDER_FILLED |
+| `/dashboard` | GET /assets | POST /assets/orders | PRICE_TICK, PRICE_ALERT, ORDER_FILLED |
 | `/conditions` | GET /conditions, GET /assets/histories | POST /conditions, DELETE /conditions/{id} | ORDER_FILLED, ORDER_FAILED |
 | `/reports/[code]` | GET /reports/stocks/{code} | POST /reports/stocks/{code}/refresh | REPORT_READY |
 | 전역(main layout) | POST /auth/refresh (AuthProvider) | POST /auth/logout | 모든 이벤트 수신 대기 |
