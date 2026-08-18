@@ -62,10 +62,13 @@ public class AssetSummaryService {
             totalEvaluation = totalEvaluation.add(evaluation);
             totalPurchase = totalPurchase.add(purchase);
 
+            BigDecimal profitLossAmount = evaluation.subtract(purchase);
+
             holdingInfos.add(new HoldingInfo(
                     h.getStockCode(),
                     stockNameMap.getOrDefault(h.getStockCode(), h.getStockCode()),
-                    h.getQuantity(), h.getAveragePrice(), currentPrice, evaluation, profitLossRate));
+                    h.getQuantity(), h.getAveragePrice(), currentPrice, evaluation,
+                    profitLossAmount, profitLossRate));
         }
 
         BigDecimal totalProfitLossAmount = totalEvaluation.subtract(totalPurchase);

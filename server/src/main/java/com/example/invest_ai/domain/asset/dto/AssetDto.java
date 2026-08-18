@@ -28,6 +28,7 @@ public class AssetDto {
             BigDecimal averagePrice,
             BigDecimal currentPrice,
             BigDecimal evaluationAmount,
+            BigDecimal profitLossAmount,
             BigDecimal profitLossRate
     ) {}
 
