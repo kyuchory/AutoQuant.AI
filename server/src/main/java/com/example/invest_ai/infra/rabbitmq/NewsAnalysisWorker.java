@@ -9,9 +9,11 @@ import com.example.invest_ai.domain.stock.entity.Stock;
 import com.example.invest_ai.domain.stock.repository.StockRepository;
 import com.example.invest_ai.infra.config.RedisKeys;
 import com.example.invest_ai.infra.openai.OpenAiClient;
+import com.example.invest_ai.domain.trade.event.NewsSentimentSavedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -24,7 +26,7 @@ import java.time.format.DateTimeFormatter;
  *
  * RabbitMQ news-queue에서 메시지를 소비하여
  * OpenAI 감성 분석 + 임베딩 후 news_sentiments에 저장하고
- * Redis report 캐시를 무효화한다.
+ * Redis report 캐시를 무효화하며 실시간 AI 매매 트리거 이벤트를 발행한다.
  */
 @Slf4j
 @Component
@@ -35,6 +37,7 @@ public class NewsAnalysisWorker {
     private final StockRepository stockRepository;
     private final OpenAiClient openAiClient;
     private final RedisTemplate<String, String> redisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     @RabbitListener(queues = RabbitMqConfig.NEWS_QUEUE)
     public void handleNews(NewsAnalysisMessage message) {
@@ -89,6 +92,11 @@ public class NewsAnalysisWorker {
             String cacheKey = RedisKeys.reportText(stockCode);
             redisTemplate.delete(cacheKey);
             log.info("[뉴스 워커] 캐시 무효화: key={}", cacheKey);
+
+            // 8. 실시간 AI 점수 조건 매칭 이벤트 발행
+            eventPublisher.publishEvent(new NewsSentimentSavedEvent(
+                    stockCode, sentiment.aiScore(), sentiment.sentiment()));
+            log.debug("[뉴스 워커] AI 점수 매매 이벤트 발행: stockCode={}, score={}", stockCode, sentiment.aiScore());
 
         } catch (Exception e) {
             // 예외 발생 시 로그만 남기고 Skip

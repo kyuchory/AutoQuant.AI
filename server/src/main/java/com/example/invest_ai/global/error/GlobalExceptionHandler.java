@@ -38,6 +38,21 @@ public class GlobalExceptionHandler {
             log.info("중복 뉴스 URL Skip: {}", causeMsg);
             return ResponseEntity.ok(ApiResponse.success(null));
         }
+        // uk_users_email → 중복 이메일
+        if (causeMsg != null && causeMsg.contains("uk_users_email")) {
+            return ResponseEntity.status(ErrorCode.DUPLICATE_EMAIL.getHttpStatus()).body(
+                    ApiResponse.error(ErrorCode.DUPLICATE_EMAIL.name(), ErrorCode.DUPLICATE_EMAIL.getMessage()));
+        }
+        // chk_conditions_* → 조건(액션) 값-타입 위반
+        if (causeMsg != null && causeMsg.contains("chk_conditions_")) {
+            return ResponseEntity.status(ErrorCode.INVALID_CONDITION.getHttpStatus()).body(
+                    ApiResponse.error(ErrorCode.INVALID_CONDITION.name(), ErrorCode.INVALID_CONDITION.getMessage()));
+        }
+        // chk_triggers_* → 트리거 값-타입 위반
+        if (causeMsg != null && causeMsg.contains("chk_triggers_")) {
+            return ResponseEntity.status(ErrorCode.INVALID_TRIGGER.getHttpStatus()).body(
+                    ApiResponse.error(ErrorCode.INVALID_TRIGGER.name(), ErrorCode.INVALID_TRIGGER.getMessage()));
+        }
 
         log.error("Unhandled DataIntegrityViolationException: ", e);
         return ResponseEntity

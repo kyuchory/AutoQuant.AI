@@ -19,6 +19,8 @@ public enum ErrorCode {
 
     // Trade
     CONDITION_NOT_FOUND(HttpStatus.NOT_FOUND, "매매 조건을 찾을 수 없습니다."),
+    INVALID_CONDITION(HttpStatus.BAD_REQUEST, "조건 값과 조건 타입을 함께 입력해야 합니다."),
+    INVALID_TRIGGER(HttpStatus.BAD_REQUEST, "유효하지 않은 트리거 유형입니다."),
 
     // Asset
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "잔고가 부족합니다."),

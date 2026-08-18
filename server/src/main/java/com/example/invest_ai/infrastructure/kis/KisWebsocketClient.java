@@ -2,6 +2,7 @@ package com.example.invest_ai.infrastructure.kis;
 
 import com.example.invest_ai.domain.stock.entity.Stock;
 import com.example.invest_ai.domain.stock.repository.StockRepository;
+import com.example.invest_ai.domain.trade.event.PriceUpdatedEvent;
 import com.example.invest_ai.global.websocket.WebSocketSessionManager;
 import com.example.invest_ai.infra.config.RedisKeys;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -10,6 +11,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -40,6 +42,7 @@ public class KisWebsocketClient {
     private final WebSocketClient webSocketClient;
     private final ObjectMapper objectMapper;
     private final String websocketEndpoint;
+    private final ApplicationEventPublisher eventPublisher;
 
     private Disposable connection;
     private volatile boolean running = true;
@@ -48,12 +51,14 @@ public class KisWebsocketClient {
             StringRedisTemplate redisTemplate,
             StockRepository stockRepository,
             WebSocketSessionManager sessionManager,
+            ApplicationEventPublisher eventPublisher,
             @Value("${kis.api.websocket-endpoint}") String websocketEndpoint
     ) {
         this.redisTemplate = redisTemplate;
         this.stockRepository = stockRepository;
         this.sessionManager = sessionManager;
         this.websocketEndpoint = websocketEndpoint;
+        this.eventPublisher = eventPublisher;
         this.webSocketClient = new ReactorNettyWebSocketClient();
         this.objectMapper = new ObjectMapper();
     }
@@ -240,18 +245,23 @@ public class KisWebsocketClient {
                     redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), priceStr);
                     redisTemplate.opsForValue().set(RedisKeys.priceChangeRate(stockCode), changeStr);
 
+                    // 조건 매칭 엔진 트리거
+                    publishPriceUpdated(stockCode, priceStr);
+
                     long currentPrice = Long.parseLong(priceStr);
                     long volume = parseLongSafe(volumeStr);
                     double changeRate = parseDoubleSafe(changeStr);
                     long accumulatedVolume = parseLongSafe(acmlVol);
 
-                    // ① PRICE_ALERT (기존 기능 — 차트/사이드바 현재가 갱신 + 전일대비 등락률)
-                    Map<String, Object> priceAlert = Map.of(
+                    // ① PRICE_TICK (전체 종목 실시간 시세 브로드캐스트 — 차트/사이드바 현재가 갱신 + 전일대비 등락률)
+                    // NOTE: PRICE_ALERT는 ConditionMatchingEngine이 "가격 조건 충족" 시에만 보내는
+                    // 별도 이벤트이므로(api.md §6.2), 여기서는 이름을 겹치지 않게 PRICE_TICK을 사용한다.
+                    Map<String, Object> priceTick = Map.of(
                             "stockCode", stockCode,
                             "currentPrice", currentPrice,
                             "changeRate", changeRate
                     );
-                    sessionManager.broadcast("PRICE_ALERT", priceAlert);
+                    sessionManager.broadcast("PRICE_TICK", priceTick);
 
                     // ② EXECUTION (체결 내역 — ExecutionList 용)
                     String formattedTime = formatChegyeolTime(timeStr);
@@ -290,6 +300,7 @@ public class KisWebsocketClient {
         String price = output.get("STCK_PRPR");
         if (stockCode != null && price != null && !price.isEmpty()) {
             redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), price);
+            publishPriceUpdated(stockCode, price);
         }
     }
 
@@ -299,6 +310,16 @@ public class KisWebsocketClient {
         String price = String.valueOf(map.get("STCK_PRPR"));
         if (stockCode != null && price != null && !price.isEmpty() && !"null".equals(price)) {
             redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), price);
+            publishPriceUpdated(stockCode, price);
+        }
+    }
+
+    /** 시세 갱신 이벤트 발행 → 조건 매칭 엔진 트리거 */
+    private void publishPriceUpdated(String stockCode, String priceStr) {
+        try {
+            eventPublisher.publishEvent(new PriceUpdatedEvent(stockCode, new java.math.BigDecimal(priceStr)));
+        } catch (Exception e) {
+            log.debug("시세 이벤트 발행 실패 (조건 매칭 스킵): {}", e.getMessage());
         }
     }
 
