@@ -1,14 +1,7 @@
 import { create } from 'zustand'
+import type { ExecutionPayload } from '@/types/socket'
 
-export interface ExecutionItem {
-  stockCode: string
-  price: number
-  volume: number
-  changeRate: number
-  accumulatedVolume: number
-  time: string
-  sign: string
-}
+export type ExecutionItem = ExecutionPayload
 
 interface ExecutionState {
   executions: ExecutionItem[]

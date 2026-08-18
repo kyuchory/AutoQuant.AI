@@ -4,6 +4,8 @@ import { useAuthStore } from '@/lib/store/authStore'
 import { useAssetStore } from '@/lib/store/assetStore'
 import { useChartStore } from '@/lib/store/chartStore'
 import { useExecutionStore } from '@/lib/store/executionStore'
+import { useOrderProposalStore } from '@/lib/store/orderProposalStore'
+import { queryClientRef } from '@/components/common/QueryClientProvider'
 import { SOCKET_EVENTS } from './socketEvents'
 
 class SocketClient {
@@ -42,17 +44,34 @@ class SocketClient {
         console.log('📩 WebSocket 수신:', type, payload)
 
         switch (type) {
-          case SOCKET_EVENTS.PRICE_ALERT:
+          case SOCKET_EVENTS.PRICE_TICK:
+            // 전체 종목 실시간 시세 브로드캐스트 (조건 발동과 무관한 단순 시세 틱)
             useAssetStore.getState().updateHoldingPrice(payload.stockCode, payload.currentPrice)
             useChartStore.getState().updatePrice(payload.stockCode, payload.currentPrice, payload.changeRate ?? 0)
             break
 
+          case SOCKET_EVENTS.PRICE_ALERT:
+          case SOCKET_EVENTS.AI_SCORE_ALERT:
+          case SOCKET_EVENTS.ORDER_FAILED:
+            // 조건(conditionId) 충족/실패 알림. 토스트 UI가 아직 없어 우선 로그로만 노출한다.
+            // TODO: 토스트 컴포넌트 도입 시 여기서 호출 (docs/frontend.md §5.2)
+            console.info(`🔔 [${type}]`, payload)
+            break
+
           case SOCKET_EVENTS.ORDER_FILLED:
             useAssetStore.getState().applyOrderFilled(payload)
+            // 조건 매칭 워커가 비동기로 체결한 주문은 대시보드/포트폴리오가 구독 중인
+            // React Query 캐시(['assets'], ['histories'])를 직접 갱신해야 화면에 반영된다.
+            queryClientRef.current?.invalidateQueries({ queryKey: ['assets'] })
+            queryClientRef.current?.invalidateQueries({ queryKey: ['histories'] })
             break
 
           case SOCKET_EVENTS.EXECUTION:
             useExecutionStore.getState().pushExecution(payload)
+            break
+
+          case SOCKET_EVENTS.ORDER_PROPOSAL:
+            useOrderProposalStore.getState().openProposal(payload)
             break
 
           default:
