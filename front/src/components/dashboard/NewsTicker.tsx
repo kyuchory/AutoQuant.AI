@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { NewsTickerDto } from '@/types/news'
 import { getNewsTicker } from '@/lib/api/news'
 
@@ -17,16 +17,11 @@ const SENTIMENT_LABEL: Record<string, string> = {
 }
 
 export default function NewsTicker() {
-  const [newsList, setNewsList] = useState<NewsTickerDto[]>([])
-
-  useEffect(() => {
-    getNewsTicker().then(setNewsList).catch(() => {})
-
-    const interval = setInterval(() => {
-      getNewsTicker().then(setNewsList).catch(() => {})
-    }, 300_000)
-    return () => clearInterval(interval)
-  }, [])
+  const { data: newsList = [] } = useQuery<NewsTickerDto[]>({
+    queryKey: ['newsTicker'],
+    queryFn: getNewsTicker,
+    refetchInterval: 300_000, // 5분 주기 폴링
+  })
 
   if (newsList.length === 0) return null
 

@@ -1,17 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import apiClient from '@/lib/api/client'
+import { useQuery } from '@tanstack/react-query'
 import { useChartStore } from '@/lib/store/chartStore'
-import type { ApiResponse } from '@/types/api'
-
-interface StockInfo {
-  stockCode: string
-  stockName: string
-  currentPrice: number
-  changeRate: number
-}
+import { getStocks } from '@/lib/api/stocks'
+import type { StockInfo } from '@/types/stocks'
 
 interface StockSidebarProps {
   selectedStockCode: string
@@ -20,27 +14,26 @@ interface StockSidebarProps {
 
 export default function StockSidebar({ selectedStockCode, onSelectStock }: StockSidebarProps) {
   const { t } = useTranslation()
-  const [stocks, setStocks] = useState<StockInfo[]>([])
   const prices = useChartStore((s) => s.prices)
 
-  useEffect(() => {
-    apiClient.get<ApiResponse<StockInfo[]>>('/stocks')
-      .then(r => {
-        const list = r.data.data ?? []
-        setStocks(list)
-        // REST API 초기 데이터를 chartStore에 반영 (장 마감/서버 재시작 대응)
-        const store = useChartStore.getState()
-        list.forEach(s => {
-          if (!store.prices[s.stockCode]) {
-            store.updatePrice(s.stockCode, Number(s.currentPrice ?? 0), s.changeRate ?? 0)
-          }
-        })
-      })
-      .catch(() => {})
-  }, [])
+  const { data: stocks } = useQuery<StockInfo[]>({
+    queryKey: ['stocks'],
+    queryFn: getStocks,
+    staleTime: 30_000,
+  })
 
-  const formatPrice = (price: number) =>
-    price.toLocaleString('ko-KR')
+  // REST API 초기 데이터를 chartStore에 동기화 (장 마감/서버 재시작 대응)
+  useEffect(() => {
+    if (!stocks) return
+    const store = useChartStore.getState()
+    stocks.forEach((s) => {
+      if (!store.prices[s.stockCode]) {
+        store.updatePrice(s.stockCode, Number(s.currentPrice ?? 0), s.changeRate ?? 0)
+      }
+    })
+  }, [stocks])
+
+  const formatPrice = (price: number) => price.toLocaleString('ko-KR')
 
   /** KIS 전일대비 등락률 기준 색상 */
   const getColor = (changeRate: number) => {
@@ -57,7 +50,7 @@ export default function StockSidebar({ selectedStockCode, onSelectStock }: Stock
         <span className="text-xs font-medium text-right" style={{ color: '#787b86' }}>{t('sidebar.prevDayChange')}</span>
       </div>
       <div className="sidebar-list">
-        {stocks.map(stock => {
+        {(stocks ?? []).map((stock) => {
           const data = prices[stock.stockCode]
           const currentPrice = data?.price ?? stock.currentPrice
           const changeRate = data?.changeRate ?? 0
