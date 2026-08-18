@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import AuthProvider from "@/components/auth/AuthProvider";
 import I18nProvider from "@/components/common/I18nProvider";
+import { QueryClientProvider } from "@/components/common/QueryClientProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,11 +17,13 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body>
-        <AuthProvider>
-          <I18nProvider>
-            {children}
-          </I18nProvider>
-        </AuthProvider>
+        <QueryClientProvider>
+          <AuthProvider>
+            <I18nProvider>
+              {children}
+            </I18nProvider>
+          </AuthProvider>
+        </QueryClientProvider>
       </body>
     </html>
   );
