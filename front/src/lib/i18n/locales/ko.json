@@ -251,6 +251,7 @@
     "register": "등록"
   },
   "sidebar": {
+    "watchlist": "관심종목",
     "stockName": "종목명",
     "currentPrice": "현재가",
     "prevDayChange": "전일대비"

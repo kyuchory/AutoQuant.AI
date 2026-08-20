@@ -251,6 +251,7 @@
     "register": "Register"
   },
   "sidebar": {
+    "watchlist": "Watchlist",
     "stockName": "Stock",
     "currentPrice": "Price",
     "prevDayChange": "Chg%"
