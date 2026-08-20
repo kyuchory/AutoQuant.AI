@@ -217,6 +217,7 @@
     "conditionRegistered": "Auto-trade condition registered."
   },
   "execution": {
+    "title": "Live Trades",
     "price": "Price",
     "volume": "Volume",
     "changeRate": "Change",

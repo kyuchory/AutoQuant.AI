@@ -217,6 +217,7 @@
     "conditionRegistered": "자동 매매 조건이 등록되었습니다."
   },
   "execution": {
+    "title": "실시간 체결",
     "price": "체결가",
     "volume": "체결량",
     "changeRate": "등락률",
