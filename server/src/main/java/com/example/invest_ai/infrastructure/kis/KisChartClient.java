@@ -2,10 +2,8 @@ package com.example.invest_ai.infrastructure.kis;
 
 import com.example.invest_ai.global.error.CustomException;
 import com.example.invest_ai.global.error.ErrorCode;
-import com.example.invest_ai.infra.config.RedisKeys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -28,29 +26,29 @@ public class KisChartClient {
 
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(5);
 
-    private final StringRedisTemplate redisTemplate;
     private final WebClient webClient;
     private final String appKey;
     private final String appSecret;
     private final KisRateLimiter rateLimiter;
+    private final KisAuthClient kisAuthClient;
 
     public KisChartClient(
-            StringRedisTemplate redisTemplate,
             @Value("${kis.api.rest-base-url}") String baseUrl,
             @Value("${kis.api.app-key}") String appKey,
             @Value("${kis.api.app-secret}") String appSecret,
-            KisRateLimiter rateLimiter
+            KisRateLimiter rateLimiter,
+            KisAuthClient kisAuthClient
     ) {
-        this.redisTemplate = redisTemplate;
         this.appKey = appKey;
         this.appSecret = appSecret;
         this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.rateLimiter = rateLimiter;
+        this.kisAuthClient = kisAuthClient;
     }
 
     /** KIS Access Token + 공통 헤더 빌드 (호출 전 레이트리밋 permit 획득) */
     private WebClient.RequestHeadersSpec<?> withAuth(String uri, String trId) {
-        String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
+        String accessToken = kisAuthClient.getAccessToken();
         if (accessToken == null || accessToken.isEmpty()) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS Access Token이 없습니다.");
         }

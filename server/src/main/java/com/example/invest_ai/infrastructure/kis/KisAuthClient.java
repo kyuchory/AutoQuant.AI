@@ -35,6 +35,15 @@ public class KisAuthClient {
     private final String appSecret;
     private final AtomicInteger retryCount = new AtomicInteger(0);
 
+    /**
+     * 인메모리 캐시 — Redis 왕복 없이 토큰을 즉시 반환한다 (고빈도 조회 구간 최적화).
+     * Redis는 재기동 시 재사용 여부 판단 및 캐시 미스(다른 인스턴스가 갱신한 경우) 폴백용으로 계속 사용한다.
+     */
+    private volatile String cachedAccessToken;
+    private volatile long accessTokenExpiresAtMillis;
+    private volatile String cachedApprovalKey;
+    private volatile long approvalKeyExpiresAtMillis;
+
     public KisAuthClient(
             StringRedisTemplate redisTemplate,
             @Value("${kis.api.rest-base-url}") String restBaseUrl,
@@ -54,11 +63,61 @@ public class KisAuthClient {
     public void init() {
         if (hasValidCachedTokens()) {
             log.info("🔑 Redis에 유효한 KIS 토큰이 이미 있어 재사용합니다 (재발급 스킵)");
+            loadCacheFromRedis();
             return;
         }
         log.info("🔑 KIS 인증 토큰 초기 발급 시작");
         issueTokens();
         log.info("🔑 KIS 인증 토큰 초기 발급 완료");
+    }
+
+    /** 재기동 시 Redis에 남아있는 유효 토큰을 인메모리 캐시로 끌어올린다. */
+    private void loadCacheFromRedis() {
+        String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
+        Long accessTtl = redisTemplate.getExpire(RedisKeys.kisAccessToken());
+        if (accessToken != null && accessTtl != null) {
+            cachedAccessToken = accessToken;
+            accessTokenExpiresAtMillis = System.currentTimeMillis() + accessTtl * 1000;
+        }
+
+        String approvalKey = redisTemplate.opsForValue().get(RedisKeys.kisApprovalKey());
+        Long approvalTtl = redisTemplate.getExpire(RedisKeys.kisApprovalKey());
+        if (approvalKey != null && approvalTtl != null) {
+            cachedApprovalKey = approvalKey;
+            approvalKeyExpiresAtMillis = System.currentTimeMillis() + approvalTtl * 1000;
+        }
+    }
+
+    /**
+     * 현재 유효한 Access Token을 반환한다.
+     * 인메모리 캐시가 유효하면 즉시 반환하고, 없거나 만료됐으면 Redis에서 폴백 조회한다
+     * (다른 인스턴스가 갱신했거나, 이 인스턴스가 막 기동해 캐시가 비어있는 경우 대비).
+     */
+    public String getAccessToken() {
+        if (cachedAccessToken != null && System.currentTimeMillis() < accessTokenExpiresAtMillis) {
+            return cachedAccessToken;
+        }
+        String token = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
+        Long ttl = redisTemplate.getExpire(RedisKeys.kisAccessToken());
+        if (token != null && ttl != null) {
+            cachedAccessToken = token;
+            accessTokenExpiresAtMillis = System.currentTimeMillis() + ttl * 1000;
+        }
+        return token;
+    }
+
+    /** 현재 유효한 WebSocket 접속키(approval_key)를 반환한다. 폴백 동작은 {@link #getAccessToken()}과 동일. */
+    public String getApprovalKey() {
+        if (cachedApprovalKey != null && System.currentTimeMillis() < approvalKeyExpiresAtMillis) {
+            return cachedApprovalKey;
+        }
+        String key = redisTemplate.opsForValue().get(RedisKeys.kisApprovalKey());
+        Long ttl = redisTemplate.getExpire(RedisKeys.kisApprovalKey());
+        if (key != null && ttl != null) {
+            cachedApprovalKey = key;
+            approvalKeyExpiresAtMillis = System.currentTimeMillis() + ttl * 1000;
+        }
+        return key;
     }
 
     /** 서버 재시작 시 Redis에 아직 유효한 토큰/approval_key가 남아있는지 확인 */
@@ -85,6 +144,8 @@ public class KisAuthClient {
                 redisTemplate.opsForValue().set(
                         RedisKeys.kisAccessToken(), accessToken,
                         Duration.ofSeconds(21000)); // 5시간 50분
+                cachedAccessToken = accessToken;
+                accessTokenExpiresAtMillis = System.currentTimeMillis() + 21000_000L;
                 log.info("✅ KIS Access Token 발급 및 Redis 저장 완료");
             }
 
@@ -94,6 +155,8 @@ public class KisAuthClient {
                 redisTemplate.opsForValue().set(
                         RedisKeys.kisApprovalKey(), approvalKey,
                         Duration.ofSeconds(21000)); // 5시간 50분
+                cachedApprovalKey = approvalKey;
+                approvalKeyExpiresAtMillis = System.currentTimeMillis() + 21000_000L;
                 log.info("✅ KIS Approval Key 발급 및 Redis 저장 완료");
             }
             success = accessToken != null && approvalKey != null;

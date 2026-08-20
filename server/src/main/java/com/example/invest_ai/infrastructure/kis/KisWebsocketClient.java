@@ -55,11 +55,14 @@ public class KisWebsocketClient {
     private final AtomicLong lastMessageAt = new AtomicLong(System.currentTimeMillis());
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
 
+    private final KisAuthClient kisAuthClient;
+
     public KisWebsocketClient(
             StringRedisTemplate redisTemplate,
             StockRepository stockRepository,
             WebSocketSessionManager sessionManager,
             ApplicationEventPublisher eventPublisher,
+            KisAuthClient kisAuthClient,
             @Value("${kis.api.websocket-endpoint}") String websocketEndpoint
     ) {
         this.redisTemplate = redisTemplate;
@@ -67,6 +70,7 @@ public class KisWebsocketClient {
         this.sessionManager = sessionManager;
         this.websocketEndpoint = websocketEndpoint;
         this.eventPublisher = eventPublisher;
+        this.kisAuthClient = kisAuthClient;
         this.webSocketClient = new ReactorNettyWebSocketClient();
         this.objectMapper = new ObjectMapper();
     }
@@ -93,6 +97,11 @@ public class KisWebsocketClient {
     @Scheduled(fixedRate = 30000)
     public void checkConnectionHealth() {
         if (!running) return;
+        if (!KisMarketHours.isOpen()) {
+            // 장 마감 후~다음 장 시작 전에는 체결 데이터가 안 오는 게 정상이다.
+            // 이 시간대에도 재연결을 강행하면 밤새 KIS 서버에 불필요한 재연결을 반복하게 된다.
+            return;
+        }
         long idleMs = System.currentTimeMillis() - lastMessageAt.get();
         if (idleMs > STALE_DATA_THRESHOLD.toMillis()) {
             log.warn("⚠️ {}초간 KIS 시세 데이터 미수신 — 강제 재연결", idleMs / 1000);
@@ -116,7 +125,7 @@ public class KisWebsocketClient {
     }
 
     private void connect() {
-        String approvalKey = redisTemplate.opsForValue().get(RedisKeys.kisApprovalKey());
+        String approvalKey = kisAuthClient.getApprovalKey();
         if (approvalKey == null || approvalKey.isEmpty()) {
             log.warn("⚠️ KIS approval_key가 Redis에 없습니다. 5초 후 재시도...");
             if (running) {

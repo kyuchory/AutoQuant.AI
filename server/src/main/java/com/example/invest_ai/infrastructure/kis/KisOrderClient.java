@@ -2,10 +2,8 @@ package com.example.invest_ai.infrastructure.kis;
 
 import com.example.invest_ai.global.error.CustomException;
 import com.example.invest_ai.global.error.ErrorCode;
-import com.example.invest_ai.infra.config.RedisKeys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -27,29 +25,29 @@ public class KisOrderClient {
 
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(5);
 
-    private final StringRedisTemplate redisTemplate;
     private final WebClient webClient;
     private final String appKey;
     private final String appSecret;
     private final String accountNo;
     private final String accountPrdtCd;
     private final KisRateLimiter rateLimiter;
+    private final KisAuthClient kisAuthClient;
 
     public KisOrderClient(
-            StringRedisTemplate redisTemplate,
             @Value("${kis.api.rest-base-url}") String baseUrl,
             @Value("${kis.api.app-key}") String appKey,
             @Value("${kis.api.app-secret}") String appSecret,
             @Value("${kis.api.account-no}") String accountNo,
             @Value("${kis.api.account-prdt-cd}") String accountPrdtCd,
-            KisRateLimiter rateLimiter
+            KisRateLimiter rateLimiter,
+            KisAuthClient kisAuthClient
     ) {
-        this.redisTemplate = redisTemplate;
         this.appKey = appKey;
         this.appSecret = appSecret;
         this.accountNo = accountNo;
         this.accountPrdtCd = accountPrdtCd;
         this.rateLimiter = rateLimiter;
+        this.kisAuthClient = kisAuthClient;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .build();
@@ -66,8 +64,7 @@ public class KisOrderClient {
      */
     public void executeOrder(String stockCode, String orderType, int quantity,
                              String ordDvsn, BigDecimal price) {
-        // Redis에서 KIS Access Token 조회
-        String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
+        String accessToken = kisAuthClient.getAccessToken();
         if (accessToken == null || accessToken.isEmpty()) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS Access Token이 없습니다.");
         }
