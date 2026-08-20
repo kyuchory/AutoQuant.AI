@@ -1,29 +1,15 @@
 import { create } from 'zustand'
 import type { OrderFilledPayload } from '@/types/socket'
-
-interface HoldingDto {
-  stockCode: string
-  stockName: string
-  quantity: number
-  averagePrice: number
-  currentPrice: number
-  evaluationAmount: number
-  profitLossRate: number
-}
+import type { AssetSummaryResponse, HoldingInfo } from '@/types/assets'
 
 interface AssetState {
   walletBalance: number | null
-  holdings: HoldingDto[]
+  holdings: HoldingInfo[]
   totalEvaluationAmount: number | null
   totalProfitLossRate: number | null
   isLoading: boolean
 
-  setAssets: (data: {
-    walletBalance: number
-    holdings: HoldingDto[]
-    totalEvaluationAmount: number
-    totalProfitLossRate: number
-  }) => void
+  setAssets: (data: AssetSummaryResponse) => void
   updateHoldingPrice: (stockCode: string, currentPrice: number) => void
   applyOrderFilled: (history: OrderFilledPayload) => void
 }

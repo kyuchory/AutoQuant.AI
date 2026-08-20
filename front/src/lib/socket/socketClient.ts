@@ -8,11 +8,15 @@ import { useOrderProposalStore } from '@/lib/store/orderProposalStore'
 import { queryClientRef } from '@/components/common/QueryClientProvider'
 import { SOCKET_EVENTS } from './socketEvents'
 
+const MAX_RECONNECT_DELAY = 30000
+const DISCONNECTED_BADGE_THRESHOLD = 5 // 연속 재연결 실패 이 횟수 이상이면 UI에 끊김 배지 표시
+
 class SocketClient {
   private ws: WebSocket | null = null
   private reconnectDelay = 1000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private intentionalClose = false
+  private consecutiveFailures = 0
 
   connect() {
     // 이미 연결된 상태면 무시
@@ -35,6 +39,8 @@ class SocketClient {
     this.ws.onopen = () => {
       console.log('✅ WebSocket 연결됨')
       this.reconnectDelay = 1000
+      this.consecutiveFailures = 0
+      useChartStore.getState().setConnectionStatus('connected')
     }
 
     this.ws.onmessage = (event) => {
@@ -47,7 +53,7 @@ class SocketClient {
           case SOCKET_EVENTS.PRICE_TICK:
             // 전체 종목 실시간 시세 브로드캐스트 (조건 발동과 무관한 단순 시세 틱)
             useAssetStore.getState().updateHoldingPrice(payload.stockCode, payload.currentPrice)
-            useChartStore.getState().updatePrice(payload.stockCode, payload.currentPrice, payload.changeRate ?? 0)
+            useChartStore.getState().updatePrice(payload.stockCode, payload.currentPrice, payload.changeRate ?? 0, payload.volume ?? 0)
             break
 
           case SOCKET_EVENTS.PRICE_ALERT:
@@ -74,7 +80,13 @@ class SocketClient {
             useOrderProposalStore.getState().openProposal(payload)
             break
 
+          case SOCKET_EVENTS.REPORT_READY:
+            // reports/[stockCode]/page.tsx의 실제 쿼리 키는 ['report', stockCode] (단수형)
+            queryClientRef.current?.invalidateQueries({ queryKey: ['report', payload.stockCode] })
+            break
+
           default:
+            console.warn('⚠️ 알 수 없는 WebSocket 메시지 타입:', type, payload)
             break
         }
       } catch (e) {
@@ -85,9 +97,15 @@ class SocketClient {
     this.ws.onclose = () => {
       console.log('WebSocket 연결 종료')
       if (!this.intentionalClose) {
-        console.log(`→ ${this.reconnectDelay}ms 후 재연결...`)
-        this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay)
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000)
+        this.consecutiveFailures += 1
+        if (this.consecutiveFailures >= DISCONNECTED_BADGE_THRESHOLD) {
+          useChartStore.getState().setConnectionStatus('disconnected')
+        }
+        // ±20% 지터 — 서버 재시작 시 다수 클라이언트의 동시 재연결(thundering herd) 방지
+        const jitter = this.reconnectDelay * (0.8 + Math.random() * 0.4)
+        console.log(`→ ${Math.round(jitter)}ms 후 재연결... (연속 실패 ${this.consecutiveFailures}회)`)
+        this.reconnectTimer = setTimeout(() => this.connect(), jitter)
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY)
       }
     }
 

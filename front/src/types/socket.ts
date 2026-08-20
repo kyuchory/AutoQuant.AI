@@ -3,6 +3,7 @@ export interface PriceTickPayload {
   stockCode: string
   currentPrice: number
   changeRate: number
+  volume: number
 }
 
 /** 가격 조건 충족 시 1회성 알림 (ConditionMatchingEngine 발행, api.md §6.2) */
@@ -38,7 +39,7 @@ export interface ExecutionPayload {
   changeRate: number
   accumulatedVolume: number
   time: string
-  sign: string // KIS CCLD_DVSN: "2"=상승/매수(빨강), "5"=하한/매도(파랑), "3"/"4"=상한/하락
+  sign: string // KIS CCLD_DVSN(체결구분, docs/kisflow.md §4): "1"=매수(빨강), "5"=매도(파랑)
 }
 
 /** 반자동 매매 제안 페이로드 (ORDER_PROPOSAL) */
