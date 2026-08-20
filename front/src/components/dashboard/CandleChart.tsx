@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createChart, CandlestickSeries, HistogramSeries, ISeriesApi, Time } from 'lightweight-charts'
 import { getDailyChart, getMinuteChart } from '@/lib/api/charts'
 import { useChartStore } from '@/lib/store/chartStore'
@@ -11,21 +12,23 @@ interface CandleChartProps {
   stockName: string
 }
 
-const PERIOD_TABS: { label: string; code: PeriodCode }[] = [
-  { label: '분봉', code: 'MINUTE' },
-  { label: '일', code: 'D' },
-  { label: '주', code: 'W' },
-  { label: '월', code: 'M' },
-  { label: '연', code: 'Y' },
+const PERIOD_TABS: { labelKey: string; code: PeriodCode }[] = [
+  { labelKey: 'chart.periodMinute', code: 'MINUTE' },
+  { labelKey: 'chart.periodDay', code: 'D' },
+  { labelKey: 'chart.periodWeek', code: 'W' },
+  { labelKey: 'chart.periodMonth', code: 'M' },
+  { labelKey: 'chart.periodYear', code: 'Y' },
 ]
 
 export default function CandleChart({ stockCode, stockName }: CandleChartProps) {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const activeRequestRef = useRef<string>('')  // "stockCode:period" for race condition guard
+  const prevCloseRef = useRef<number | null>(null)
 
   const [period, setPeriod] = useState<PeriodCode>('D')
   const [loading, setLoading] = useState(true)
@@ -35,7 +38,8 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
     openPrice: number; highPrice: number; lowPrice: number
   } | null>(null)
 
-  const prices = useChartStore((s) => s.prices)
+  // 이 종목의 시세만 구독 — 다른 종목 틱으로 인한 불필요한 리렌더 방지
+  const priceData = useChartStore((s) => s.prices[stockCode])
 
   // 초기화
   useEffect(() => {
@@ -107,7 +111,7 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
       if (activeRequestRef.current !== requestId) return
 
       if (!res.success || !res.data) {
-        setError('차트 데이터를 불러올 수 없습니다.')
+        setError(t('chart.loadError'))
         setLoading(false)
         return
       }
@@ -129,33 +133,85 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
         highPrice: data.highPrice,
         lowPrice: data.lowPrice,
       })
+      prevCloseRef.current = data.currentPrice - data.changeAmount
       setLoading(false)
     }).catch(() => {
       if (activeRequestRef.current !== requestId) return
-      setError('차트 데이터를 불러올 수 없습니다.')
+      setError(t('chart.loadError'))
       setLoading(false)
     })
-  }, [stockCode, period])
+  }, [stockCode, period, t])
 
-  // 실시간 가격 업데이트
-  const priceData = prices[stockCode]
+  // 실시간 가격 업데이트 (캔들 + 거래량 + 헤더)
   const realtimePrice = priceData?.price
+  const realtimeChangeRate = priceData?.changeRate
+  const realtimeVolume = priceData?.volume
   useEffect(() => {
-    if (!realtimePrice || !candleSeriesRef.current || !candleSeriesRef.current.data().length) return
+    if (!realtimePrice || realtimePrice <= 0) return
+    // 종목/기간 전환 중(REST 응답 대기 중) 도착한 틱이 이전 차트 데이터에 섞이는 것을 방지
+    if (activeRequestRef.current !== `${stockCode}:${period}`) return
 
-    const data = candleSeriesRef.current.data()
-    const last = data[data.length - 1]
-    if (!last || !('open' in last)) return  // WhitespaceData 가드
+    if (candleSeriesRef.current && candleSeriesRef.current.data().length) {
+      const data = candleSeriesRef.current.data()
+      const last = data[data.length - 1]
+      if (last && 'open' in last) {  // WhitespaceData 가드
+        const lastTime = last.time as number
+        // 분봉은 실시간 틱이 분 경계를 넘으면 새 봉을 열어야 함(그 외 기간은 당일 하루짜리 봉 유지)
+        const nowBucket = period === 'MINUTE' ? Math.floor(Date.now() / 60000) * 60 : lastTime
+        const opensNewBar = period === 'MINUTE' && nowBucket > lastTime
 
-    // 항상 현재 캔들의 time을 사용 (KST/UTC 차이로 인한 updateTime < last.time 오류 방지)
-    candleSeriesRef.current.update({
-      time: last.time as Time,
-      open: last.open,
-      high: Math.max(last.high, realtimePrice),
-      low: Math.min(last.low, realtimePrice),
-      close: realtimePrice,
+        if (opensNewBar) {
+          candleSeriesRef.current.update({
+            time: nowBucket as Time,
+            open: realtimePrice, high: realtimePrice, low: realtimePrice, close: realtimePrice,
+          })
+          if (volumeSeriesRef.current) {
+            volumeSeriesRef.current.update({
+              time: nowBucket as Time,
+              value: realtimeVolume ?? 0,
+              color: 'rgba(239, 83, 80, 0.3)',
+            })
+          }
+        } else {
+          // 항상 현재 캔들의 time을 사용 (KST/UTC 차이로 인한 updateTime < last.time 오류 방지)
+          candleSeriesRef.current.update({
+            time: last.time as Time,
+            open: last.open,
+            high: Math.max(last.high, realtimePrice),
+            low: Math.min(last.low, realtimePrice),
+            close: realtimePrice,
+          })
+          if (volumeSeriesRef.current) {
+            const volData = volumeSeriesRef.current.data()
+            const lastVol = volData[volData.length - 1]
+            const prevValue = lastVol && 'value' in lastVol ? lastVol.value : 0
+            volumeSeriesRef.current.update({
+              time: last.time as Time,
+              value: prevValue + (realtimeVolume ?? 0),
+              color: realtimePrice >= last.open ? 'rgba(239, 83, 80, 0.3)' : 'rgba(25, 118, 210, 0.3)',
+            })
+          }
+        }
+      }
+    }
+
+    setHeaderData(prev => {
+      if (!prev) return prev
+      const prevClose = prevCloseRef.current
+      const changeAmount = prevClose ? realtimePrice - prevClose : prev.changeAmount
+      const changeRate = typeof realtimeChangeRate === 'number'
+        ? realtimeChangeRate
+        : (prevClose ? (changeAmount / prevClose) * 100 : prev.changeRate)
+      return {
+        ...prev,
+        currentPrice: realtimePrice,
+        changeAmount,
+        changeRate,
+        highPrice: Math.max(prev.highPrice, realtimePrice),
+        lowPrice: prev.lowPrice > 0 ? Math.min(prev.lowPrice, realtimePrice) : realtimePrice,
+      }
     })
-  }, [realtimePrice, period, stockCode])  // stockCode 의존성 추가
+  }, [realtimePrice, realtimeChangeRate, realtimeVolume, period, stockCode])
 
   const changeColor = headerData && headerData.changeRate >= 0 ? '#ef5350' : '#1976d2'
   const changeSign = headerData && headerData.changeRate >= 0 ? '+' : ''
@@ -174,13 +230,13 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
               {changeSign}{headerData.changeRate.toFixed(2)}%
             </span>
             <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              시 {headerData.openPrice.toLocaleString('ko-KR')}
+              {t('chart.open')} {headerData.openPrice.toLocaleString('ko-KR')}
             </span>
             <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              고 {headerData.highPrice.toLocaleString('ko-KR')}
+              {t('chart.high')} {headerData.highPrice.toLocaleString('ko-KR')}
             </span>
             <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              저 {headerData.lowPrice.toLocaleString('ko-KR')}
+              {t('chart.low')} {headerData.lowPrice.toLocaleString('ko-KR')}
             </span>
           </>
         )}
@@ -196,7 +252,7 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
               background: period === tab.code ? '#1e2533' : 'transparent',
               color: period === tab.code ? '#d1d4dc' : '#787b86',
             }}>
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>

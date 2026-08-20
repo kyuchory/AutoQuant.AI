@@ -11,14 +11,14 @@ import { useChartStore } from '@/lib/store/chartStore'
 export default function DashboardPage() {
   const [selectedStockCode, setSelectedStockCode] = useState('005930')
   const [selectedStockName, setSelectedStockName] = useState('삼성전자')
-  const prices = useChartStore((s) => s.prices)
+  const selectedPrice = useChartStore((s) => s.prices[selectedStockCode])
 
   const handleSelectStock = (stockCode: string, stockName: string) => {
     setSelectedStockCode(stockCode)
     setSelectedStockName(stockName)
   }
 
-  const currentPrice = prices[selectedStockCode]?.price ?? 0
+  const currentPrice = selectedPrice?.price ?? 0
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#0d1117', overflow: 'hidden' }}>
