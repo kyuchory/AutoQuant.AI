@@ -143,12 +143,26 @@ if (tr.targetValue() == null || tr.targetValue().compareTo(BigDecimal.ZERO) >= 0
 - `./gradlew compileJava` 정상 통과
 - 앱 정상 기동, KIS 토큰/승인키 발급 + 웹소켓 10종목 구독 정상 확인
 
+## 회귀 테스트로 고정
+
+같은 버그가 재발해도 리뷰에 의존하지 않고 바로 잡히도록, 고칠 수 있는 것 위주로 테스트를 남겼다
+(`ConditionMatchingEngineTest`, `ConditionServiceTest`).
+
+- `@Async`가 `onPriceUpdated`/`onNewsSentimentSaved`에서 제거되면 실패 (리플렉션으로 어노테이션 존재 확인)
+- 주문 동시성 락 TTL이 10초 미만으로 되돌아가면 실패
+- AND 결합에서 앞 트리거가 불일치해도 트레일링 스탑 고점이 갱신되는지 확인
+- 트레일링 스탑 `targetValue`가 0 이상이면 등록 자체가 거부되는지 확인
+
+DB 인덱스(3번)는 스키마 상태라 이 테스트 스위트로는 고정하지 않았다 — `SHOW INDEX`로 수동 확인.
+
 ## 변경 파일
 
 - `server/src/main/java/com/example/invest_ai/config/AsyncConfig.java` (신규)
 - `server/src/main/java/com/example/invest_ai/domain/trade/service/ConditionMatchingEngine.java`
 - `server/src/main/java/com/example/invest_ai/domain/trade/service/ConditionService.java`
 - `server/src/main/java/com/example/invest_ai/infra/config/RedisKeys.java`
+- `server/src/test/java/com/example/invest_ai/domain/ConditionMatchingEngineTest.java` (신규)
+- `server/src/test/java/com/example/invest_ai/domain/ConditionServiceTest.java` (신규)
 - `docs/database.md` (인덱스 DDL 추가)
 - MySQL `invest_db.trading_conditions` — `idx_conditions_stock_active` 인덱스 추가 (직접 적용)
 
