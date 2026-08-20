@@ -1,6 +1,7 @@
 package com.example.invest_ai.domain.trade.service;
 
 import com.example.invest_ai.domain.asset.dto.AssetDto.OrderRequest;
+import com.example.invest_ai.domain.asset.dto.AssetDto.OrderResponse;
 import com.example.invest_ai.domain.asset.entity.Holding;
 import com.example.invest_ai.domain.asset.repository.HoldingRepository;
 import com.example.invest_ai.domain.asset.service.AssetService;
@@ -49,6 +50,8 @@ import java.util.Map;
 public class ConditionMatchingEngine {
 
     private static final String TRAILING_STOP = "TRAILING_STOP";
+    /** clinerules.md §4.2 재시도 정책 — 이 횟수를 넘겨 계속 실패하면 조건을 비활성화한다 */
+    private static final int MAX_ORDER_RETRY = 5;
 
     private final TradingConditionRepository conditionRepository;
     private final HoldingRepository holdingRepository;
@@ -194,6 +197,12 @@ public class ConditionMatchingEngine {
      * - MANUAL: WebSocket ORDER_PROPOSAL 이벤트로 AI 근거 + 뉴스(발행시각) 포함 반자동 제안 모달 전송
      */
     private void execute(TradingCondition condition, BigDecimal currentPrice) {
+        // ── 재시도 백오프 (직전 체결 실패 후 10초 이내면 이번 틱은 건너뛴다) ──
+        String backoffKey = RedisKeys.rateConditionBackoff(condition.getConditionId());
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(backoffKey))) {
+            return;
+        }
+
         // ── 동시성 락 (Redis 2차 방어선) ──
         String lockKey = RedisKeys.rateOrderLock(condition.getUserId(), condition.getStockCode());
         Boolean acquired = redisTemplate.opsForValue()
@@ -286,10 +295,33 @@ public class ConditionMatchingEngine {
                 condition.getConditionId(), condition.getStockCode(),
                 condition.getOrderType(), condition.getOrderQuantity());
 
-        assetService.executeOrder(condition.getUserId(), orderRequest);
+        OrderResponse result = assetService.executeOrder(condition.getUserId(), orderRequest, condition.getConditionId());
 
-        // 1회성 조건만 비활성화 (isPersistent=true면 계속 감시)
-        condition.deactivateIfNotPersistent();
-        conditionRepository.save(condition);
+        if ("FILLED".equals(result.status())) {
+            // 체결 성공 → 재시도 카운터 정리 + 1회성 조건만 비활성화 (isPersistent=true면 계속 감시)
+            redisTemplate.delete(RedisKeys.rateConditionRetryCount(condition.getConditionId()));
+            condition.deactivateIfNotPersistent();
+            conditionRepository.save(condition);
+            return;
+        }
+
+        // 체결 실패 → redisflow.md §2.6 / clinerules.md §4.2: is_active는 체결 "성공" 시에만 끈다.
+        // 대신 재시도 폭주를 막기 위해 짧은 백오프를 걸고, 반복 실패가 누적되면 그때 비활성화한다.
+        String retryCountKey = RedisKeys.rateConditionRetryCount(condition.getConditionId());
+        Long failCount = redisTemplate.opsForValue().increment(retryCountKey);
+        redisTemplate.expire(retryCountKey, Duration.ofMinutes(5));
+
+        if (failCount != null && failCount >= MAX_ORDER_RETRY) {
+            log.error("🚫 [완전자동] 재시도 {}회 초과로 조건 비활성화: conditionId={}, reason={}",
+                    MAX_ORDER_RETRY, condition.getConditionId(), result.failureReason());
+            condition.updateActive(false);
+            conditionRepository.save(condition);
+            redisTemplate.delete(retryCountKey);
+            return;
+        }
+
+        log.warn("⚠️ [완전자동] 주문 체결 실패({}회째) → 10초 백오프 후 재시도: conditionId={}, reason={}",
+                failCount, condition.getConditionId(), result.failureReason());
+        redisTemplate.opsForValue().set(RedisKeys.rateConditionBackoff(condition.getConditionId()), "1", Duration.ofSeconds(10));
     }
 }
