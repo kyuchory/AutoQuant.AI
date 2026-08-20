@@ -21,18 +21,21 @@
 
 | # | Domain | Key 패턴 | Value | 자료구조 | TTL | Writer | Reader | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 시세 | `price:{stockCode}:current` | 현재 체결가 (숫자, 문자열로 저장) | String | 없음 (계속 SET) | `KisWebsocketClient` | `AssetSummaryService`, 조건 매칭 워커 | 확정 |
+| 1 | 시세 | `price:{stockCode}:current` | 현재 체결가 (숫자, 문자열로 저장) | String | [v10 정정] 3분 (`RedisKeys.PRICE_CURRENT_TTL`) | `KisWebsocketClient` (실시간 SET), `RedisPriceClient` (v9: 캐시 미스 시 KIS REST(FHKST01010100) 폴백 SET) | `AssetSummaryService`, 조건 매칭 워커 | v10 갱신 |
 | 2 | AI 리포트 | `report:{stockCode}:text` | 리포트 본문 (JSON 문자열) | String | **12시간** | RabbitMQ `ReportWorker` | `GET /reports/stocks/{code}` | 확정 |
 | 3 | 인증 | `auth:{userId}:refreshToken` | Refresh Token 값 | String | **14일** | `AuthService` (로그인/refresh 시) | `POST /auth/refresh` | 확정 |
 | 4 | 인증 | `auth:{jti}:blacklist` | `"1"` (존재 여부만 체크) | String | Access Token 잔여 만료시간과 동일 | `AuthService` (로그아웃 시) | JWT 인증 필터 (매 요청) | 확정 |
 | 5 | KIS 외부인증 | `kis:auth:accessToken` | KIS Access Token 값 | String | **5시간 50분** | 앱 기동 시 + 스케줄러(5.5시간 주기) | `KisWebsocketClient`, 주문 실행 클라이언트 | 확정 |
 | 6 | KIS 외부인증 | `kis:auth:approvalKey` | 웹소켓 접속키(approval_key) | String | **5시간 50분** | 앱 기동 시 + 재연결 시 | `KisWebsocketClient` | 확정 |
 | 7 | 동시성 락 | `rate:order:lock:{userId}:{stockCode}` | `"locked"` | String (NX 옵션으로 SET) | **4초** | 조건 매칭 워커 (주문 시도 직전) | 동일 워커 (락 존재 여부 확인) | 확정 |
-| 8 | 전역 레이트리미터 | `rate:kis:global:orderCount` | 슬라이딩 윈도우 카운터 | String (INCR) 또는 Sorted Set | **1초** (윈도우 주기에 맞춰 자동 만료) | 주문 실행 클라이언트 (호출 직전 INCR) | 동일 클라이언트 (한도 초과 시 큐잉/대기) | 확정 |
+| 8 | 전역 레이트리미터 | ~~`rate:kis:global:orderCount`~~ (v9: 미사용 — §2.7 참고) | - | - | - | - | - | **v9: 인메모리 `KisRateLimiter`로 대체, Redis 키 미사용** |
 | 9 | 웹소켓 라우팅 | `ws:session:{userId}` | 접속 여부/서버 인스턴스 ID | String | 30분 (핑퐁 연장) + onClose 시 즉시 DEL | WebSocket 연결/해제 핸들러 | 조건 매칭 워커 (알림 전송 대상 판별) | **보류 — 확장 포인트로만 기록, 지금은 미구현** |
 | 10 | 차트 캐시 | `chart:{stockCode}:daily:{period}` | ChartResponse JSON | String | D:10분, W:1시간, M:6시간, Y:24시간 | `ChartService` (Cache Miss 시 KIS 호출 후 저장) | `GET /charts/{stockCode}/daily?period=` | v5 신규 |
 | 11 | 차트 캐시(분봉) | `chart:{stockCode}:minute` | ChartResponse JSON | String | 다음날 09:00까지 | `ChartService` (장 마감 후 저장) | `GET /charts/{stockCode}/minute` | v5 신규 |
-| 12 | 시세 등락률 | `price:{stockCode}:changeRate` | 전일대비 등락률 (예: "1.25") | String | 24시간 | `KisWebsocketClient` (실시간 SET), `StockService` (KIS REST API fallback SET) | `StockService` (GET /stocks 호출 시), `RedisPriceClient.getChangeRate()` | v6 신규 |
+| 12 | 시세 등락률 | `price:{stockCode}:changeRate` | 전일대비 등락률 (예: "1.25") | String | 24시간 | `KisWebsocketClient` (실시간 SET), `RedisPriceClient` (v9: KIS REST API fallback SET — 기존 `StockService`에 있던 폴백 로직을 `RedisPriceClient.getCurrentPrice()` 내부로 이동해 `price:current`/`changeRate`를 한 번의 KIS 호출로 함께 갱신) | `StockService` (GET /stocks 호출 시), `RedisPriceClient.getChangeRate()` | v9 갱신 |
+| 13 | AI 리포트 새로고침 레이트리밋 | `rate:report:refresh:{stockCode}` | `"1"` (존재 여부만 체크) | String (SET NX EX 30) | **30초** | `ReportController.refreshReport()` (요청 접수 직전 SET NX) | 동일 컨트롤러 (락 존재 여부 확인) | v10 신규 (api.md §5.4 E4290) |
+| 14 | 자동매매 체결 실패 재시도 카운터 | `rate:condition:retryCount:{conditionId}` | 실패 누적 횟수 | String (INCR) | **5분** | `ConditionMatchingEngine.execute()` | 동일 엔진 (최대 재시도 판단) | v10 신규 |
+| 15 | 자동매매 체결 실패 백오프 | `rate:condition:backoff:{conditionId}` | `"1"` | String (SET NX EX 10) | **10초** | `ConditionMatchingEngine.execute()` | 동일 엔진 (백오프 중 스킵) | v10 신규 |
 
 ---
 
@@ -44,11 +47,13 @@
 Key   : price:005930:current
 Value : "79500.0000"
 자료구조: String
-TTL   : 없음 (KIS Websocket이 체결가를 수신할 때마다 SET으로 덮어씀)
+TTL   : [v10 정정] 3분 (`RedisKeys.PRICE_CURRENT_TTL`) — 이전 버전 문서는 "TTL 없음"으로 고정했으나
+        실제 구현은 구독 끊김 시 값이 영구히 stale해지는 걸 막기 위해 3분 TTL을 둔다.
 ```
 - 종목은 `stocks.is_monitored = TRUE`인 10종목으로 키 개수가 고정됨(`price:005930:current` ~ `price:XXXXXX:current`).
 - 값은 소수점 4자리까지 문자열로 저장(테이블의 `DECIMAL(18,4)`와 정밀도 일치).
-- 장 마감 후에도 마지막 체결가가 유지되는 것이 의도된 동작.
+- **[v10 정정]** "장 마감 후에도 마지막 체결가가 유지되는 것"은 여전히 사용자에게 보이는 동작이지만, 그 방식이 바뀌었다 — 키 자체는 3분 뒤 만료되고, 다음 조회 시 아래 Writer 2(REST 폴백)가 즉시 재조회해 다시 채운다. 즉 "무제한 TTL로 값이 안 지워짐"이 아니라 "TTL은 있지만 캐시미스 시 자동 복구됨"으로 동일한 사용자 경험을 만든다.
+- **[v9] Writer 2 추가**: `RedisPriceClient.getCurrentPrice()`가 이 키를 GET해서 값이 없으면(서버 재시작 직후, 장마감 후 웹소켓이 아직 값을 채우지 못한 경우, 또는 위 3분 TTL 만료 등) `KisChartClient.getCurrentQuote()`(REST FHKST01010100)로 마지막 체결가를 조회해 이 키에 SET하고 반환한다. 이 덕분에 `StockService`/`ChartService`/`AssetSummaryService` 세 호출부 모두 웹소켓 미수신 상황에서도 0 대신 실제 마지막 체결가를 얻는다.
 
 ---
 
@@ -61,7 +66,7 @@ Value : "1.25" 또는 "-2.84"
 TTL   : 86400초 (24시간)
 ```
 - **Writer 1**: `KisWebsocketClient` — 실시간 H0STCNT0 수신 시 fields[5](PRDY_CTRT) 값을 SET.
-- **Writer 2**: `StockService` — Redis miss 시 KIS REST API(FHKST01010100) 호출로 `prdy_ctrt` 값을 받아 SET (fallback).
+- **Writer 2 [v9]**: `RedisPriceClient.getCurrentPrice()` — `price:{stockCode}:current` 캐시 미스 시 KIS REST API(FHKST01010100)를 호출하면서, 응답에 포함된 `prdy_ctrt` 값도 함께 이 키에 SET (fallback). 기존에는 `StockService`가 이 SET을 직접 수행했으나, 현재가/등락률 폴백을 한 번의 KIS 호출로 묶기 위해 `RedisPriceClient` 내부로 이동했다.
 - **Reader**: `StockService.getMonitoredStocksWithPrice()` — GET /stocks 호출 시 조회하여 `StockInfo.changeRate`에 포함.
 - 장 마감 후 서버 재시작 시에도 KIS REST API fallback으로 복구됨.
 
@@ -77,6 +82,21 @@ TTL   : 43200초 (12시간)
 ```
 - **캐시 무효화(우선순위 1순위)**: 뉴스 수집 스케줄러가 해당 종목의 신규 뉴스를 `news_sentiments`에 INSERT하는 시점에 이 키를 즉시 `DEL`한다. 12시간 TTL은 무효화 로직이 어떤 이유로든 발동하지 않았을 때의 보조 안전장치일 뿐이다.
 - 캐시 미스 시 `ai_investment_reports` 최신 레코드를 대신 반환(§API 명세서 5.1)하며, 이 경우 자동으로 Redis에 다시 채워 넣지 않는다(새 리포트 생성은 `/refresh` 트리거로만 발생).
+
+---
+
+### 2.2-2 `rate:report:refresh:{stockCode}` — AI 리포트 새로고침 레이트리밋 (v10 신규)
+
+```
+Key   : rate:report:refresh:005930
+Value : "1"
+자료구조: String (SET ... NX EX 30)
+TTL   : 30초
+```
+- `POST /reports/stocks/{stockCode}/refresh` 요청 시 RabbitMQ 발행 직전 `SET NX EX 30`으로 락 획득을 시도한다.
+- 락 획득 실패(이미 존재) → `CustomException(REPORT_REFRESH_RATE_LIMITED)` → HTTP 429(`api.md §5.4 E4290`).
+- §2.6 `rate:order:lock`과 동일하게 유저 단위가 아닌 **종목 단위**로 잠근다 — 여러 유저가 동시에 같은 종목을 새로고침해도 워커 중복 실행을 막기 위함.
+- 이 락이 도입되기 전에는 프론트가 요청 완료 즉시 버튼을 재활성화해 같은 종목이 짧은 시간에 여러 번 큐잉되는 문제가 있었다(프론트 로딩 상태 버그와는 별개의 서버측 방어선).
 
 ---
 
@@ -142,18 +162,39 @@ TTL   : 4초
 
 ---
 
-### 2.7 `rate:kis:global:orderCount` — KIS 전역 호출 레이트리미터
+### 2.6-2 `rate:condition:retryCount:{conditionId}` / `rate:condition:backoff:{conditionId}` — 자동매매 체결 실패 재시도 (v10 신규)
 
 ```
-Key   : rate:kis:global:orderCount:{epochSecond}
-Value : 카운터 (INCR로 증가)
-자료구조: String (INCR) — 초 단위로 키 자체가 바뀌는 슬라이딩 방식
-TTL   : 2초 (해당 초가 지나면 자동 소멸)
+Key   : rate:condition:retryCount:42
+Value : 실패 누적 횟수 (문자열 정수, INCR)
+자료구조: String
+TTL   : 5분 (첫 실패 시 설정, 그 안에서만 누적)
+
+Key   : rate:condition:backoff:42
+Value : "1"
+자료구조: String (SET NX EX 10)
+TTL   : 10초
 ```
-- 주문 실행 클라이언트가 KIS REST 주문 API를 호출하기 직전 현재 초(`epochSecond`) 기준 키를 `INCR`.
-- 반환된 카운트가 KIS의 초당 허용 호출 수(예: 실제 한도는 KIS 공식 문서 확인 후 상수화)를 넘으면, 해당 요청은 다음 초까지 대기열(RabbitMQ 재발행 또는 짧은 딜레이 후 재시도)로 보낸다.
-- 이 카운터는 §2.6의 유저별 락과 별개로, "유저 여러 명이 동시에 각자 다른 종목 주문을 넣어 KIS 서버 전체 호출 한도를 넘기는 상황"을 방지하기 위한 것이다.
-- 실제 KIS 호출 한도 수치는 모의투자 계좌 기준으로 별도 확인이 필요하며, 확인되는 대로 이 문서의 임계값을 상수로 명시한다 (현재는 자리만 확보).
+- **배경**: 예전엔 `ConditionMatchingEngine.execute()`가 `assetService.executeOrder()`의 성공/실패를 확인하지 않고 무조건 `is_active=false`로 전환했다. clinerules.md §4.2가 명시적으로 금지한 "`has_triggered`식 영구 잠김"이 주문 실패(KIS 장애, 레이트리밋 등) 시에도 그대로 재현되는 버그였다.
+- **수정된 동작**: 주문이 `FILLED`일 때만 `is_active`를 끈다(§2.6과 동일한 "성공 시에만" 원칙). 실패하면 `rate:condition:retryCount:{conditionId}`를 INCR하고, 곧바로 재시도하지 않도록 `rate:condition:backoff:{conditionId}`를 10초간 세팅한다 — 시세 틱마다 재평가되는 조건이 실패 직후 매 틱 KIS를 두들기는 걸 막기 위함. `evaluateConditionsForStock`이 이 백오프 키가 있으면 해당 조건을 건너뛴다.
+- **최대 재시도**: 5회(`ConditionMatchingEngine.MAX_ORDER_RETRY`) 누적 실패하면 그때 `is_active=false`로 전환하고 카운터를 지운다 — clinerules.md §4.2의 "재시도 큐로 재발행하거나, 재시도 정책(최대 횟수, 백오프)을 Consumer에 명시" 중 후자 방식을 별도 RabbitMQ 큐 신설 없이 Redis만으로 구현한 것이다(자동매매 체결 자체가 큐가 아니라 `@TransactionalEventListener` 동기 호출 구조이기 때문).
+- 체결 성공 시 `retryCount` 키는 즉시 DEL한다.
+
+---
+
+### 2.7 KIS 전역 호출 레이트리미터 — `KisRateLimiter` (v9: Redis 설계 → 인메모리 구현으로 확정)
+
+> **[v9] 설계 변경**: 최초 설계는 아래 `rate:kis:global:orderCount:{epochSecond}` Redis INCR 슬라이딩 카운터였으나, 실제 구현은 이 키를 사용하지 않고 애플리케이션 인스턴스 내 **인메모리 `Semaphore` 기반 leaky-bucket**(`infrastructure.kis.KisRateLimiter`)으로 대체됐다. 아래에 실제 동작을 문서화한다.
+
+```
+컴포넌트: infrastructure.kis.KisRateLimiter (Redis 키 없음 — 인메모리 java.util.concurrent.Semaphore)
+동작    : permit 2개, @Scheduled(500ms)마다 최대 permit까지 재충전 → 초당 최대 약 4건으로 호출량 제한
+acquire : tryAcquire(3초 타임아웃) — 획득 실패 시 CustomException(INTERNAL_SERVER_ERROR) 발생 (큐잉/재시도 없음)
+```
+- **적용 범위**: 원 설계는 "주문 실행 클라이언트"(KIS 주문 API)로 범위를 한정했으나, 실제로는 `KisChartClient`(일봉/분봉/현재가 조회)와 `KisOrderClient`(주문) 전체 REST 호출에 공통 적용한다 — `RedisPriceClient.getCurrentPrice()`의 캐시미스 폴백처럼 다수 종목을 순회하며 KIS REST를 호출하는 경로의 버스트도 함께 방어하기 위함.
+- **알려진 한계 (다중 인스턴스 미대응)**: 인메모리 방식이므로 서버가 2대 이상으로 스케일아웃되면 인스턴스별로 독립된 한도가 적용되어 전체 합산 호출량이 KIS 한도를 넘을 수 있다. 현재는 서버가 1대로 운영되는 전제하에 채택한 설계이며, §2.8의 `ws:session:{userId}`와 마찬가지로 스케일아웃 시점에 원래 설계였던 Redis INCR 방식(또는 Redis 기반 분산 세마포어)으로 교체가 필요하다.
+- **한도 초과 시 동작**: 원 설계의 "다음 초까지 대기열(RabbitMQ 재발행/재시도)"과 달리, 현재 구현은 3초 대기 후에도 permit을 못 얻으면 예외를 던지고 호출부(`AssetService.executeOrder` 등)의 기존 실패 처리 경로(`markFailed` 등)로 흡수된다. 별도 재시도 큐는 아직 없다.
+- `RedisKeys.rateKisOrderCount()`는 위 Redis 설계를 위해 미리 만들어졌던 키 헬퍼로, 현재는 사용되지 않는다(코드상 유지, 향후 다중 인스턴스 전환 시 재사용 후보).
 
 ---
 
@@ -177,12 +218,15 @@ TTL   : 1800초(30분) + 클라이언트 핑퐁으로 연장, onClose 시 즉시
 | Key | 무효화 트리거 | 방식 |
 |---|---|---|
 | `report:{stockCode}:text` | 해당 종목 신규 뉴스 INSERT | 즉시 DEL |
+| `rate:report:refresh:{stockCode}` | 자연 만료(TTL 30초) | 자동 소멸, 별도 DEL 불필요 |
+| `rate:condition:retryCount:{conditionId}` | 체결 성공 또는 자연 만료(TTL 5분) | 성공 시 즉시 DEL, 그 외엔 자동 소멸 |
+| `rate:condition:backoff:{conditionId}` | 자연 만료(TTL 10초) | 자동 소멸, 별도 DEL 불필요 |
 | `price:{stockCode}:changeRate` | 자연 만료(TTL 24시간) + WebSocket 실시간 덮어쓰기 | 자동 소멸 or 덮어쓰기 |
 | `auth:{userId}:refreshToken` | 로그아웃, Refresh Token Rotation, 토큰 탈취 의심 | 즉시 DEL 또는 덮어쓰기 |
 | `auth:{jti}:blacklist` | 자연 만료(TTL) | 자동 소멸 |
 | `kis:auth:*` | 스케줄러 선제 갱신 | 덮어쓰기 (기존 값 자동 대체) |
 | `rate:order:lock:*` | 자연 만료(TTL 4초) | 자동 소멸, 별도 DEL 불필요 |
-| `rate:kis:global:orderCount:*` | 자연 만료(TTL 2초, 초 단위 키 자체 회전) | 자동 소멸 |
+| ~~`rate:kis:global:orderCount:*`~~ | (v9: 미사용) | 인메모리 `KisRateLimiter`가 대체 — §2.7 참고 |
 | `ws:session:*` (도입 시) | WebSocket `onClose` | 즉시 DEL, TTL은 보조 안전장치 |
 
 ---
