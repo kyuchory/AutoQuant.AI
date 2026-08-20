@@ -5,13 +5,14 @@ import { useTranslation } from 'react-i18next'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useOrderProposalStore } from '@/lib/store/orderProposalStore'
 import { createOrder } from '@/lib/api/assets'
+import type { TFunction } from 'i18next'
 
 const UP = '#e63740'
 const DOWN = '#1d64c4'
 const AI_COLOR = '#a855f7'
 
 /** 기사 발행 시간 상대시간(Relative Time) 포맷팅 */
-function formatTimeAgo(isoString?: string): string {
+function formatTimeAgo(t: TFunction, isoString?: string): string {
   if (!isoString) return ''
   try {
     const pubDate = new Date(isoString)
@@ -22,10 +23,10 @@ function formatTimeAgo(isoString?: string): string {
 
     const timeStr = pubDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-    if (diffMin < 1) return `방금 전 (${timeStr})`
-    if (diffMin < 60) return `${diffMin}분 전 (${timeStr})`
-    if (diffHour < 24) return `${diffHour}시간 전 (${timeStr})`
-    return `${pubDate.getMonth() + 1}월 ${pubDate.getDate()}일 ${timeStr}`
+    if (diffMin < 1) return t('orderProposal.timeJustNow', { time: timeStr })
+    if (diffMin < 60) return t('orderProposal.timeMinutesAgo', { count: diffMin, time: timeStr })
+    if (diffHour < 24) return t('orderProposal.timeHoursAgo', { count: diffHour, time: timeStr })
+    return t('orderProposal.timeDateAgo', { month: pubDate.getMonth() + 1, day: pubDate.getDate(), time: timeStr })
   } catch {
     return isoString
   }
@@ -34,7 +35,9 @@ function formatTimeAgo(isoString?: string): string {
 export default function OrderProposalModal() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const { proposal, isOpen, closeProposal } = useOrderProposalStore()
+  const proposal = useOrderProposalStore((s) => s.proposal)
+  const isOpen = useOrderProposalStore((s) => s.isOpen)
+  const closeProposal = useOrderProposalStore((s) => s.closeProposal)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const orderMutation = useMutation({
@@ -58,10 +61,15 @@ export default function OrderProposalModal() {
 
   const handleExecuteOrder = () => {
     setErrorMsg(null)
+    const isLimit = proposal.orderPriceType === 'LIMIT'
     orderMutation.mutate({
       stockCode: proposal.stockCode,
       orderType: proposal.orderType,
       quantity: proposal.orderQuantity,
+      ordDvsn: isLimit ? '00' : '01',
+      // AI가 제안한 지정가를 실제 주문에도 실어 보낸다 — 이전엔 이 필드가 빠져서
+      // 화면엔 "지정가 ₩X"로 보여주고 실제로는 시장가로 체결됐다.
+      ...(isLimit && proposal.limitPrice != null ? { price: proposal.limitPrice } : {}),
     })
   }
 
@@ -223,7 +231,7 @@ export default function OrderProposalModal() {
                   </span>
                   {proposal.newsPublishedAt && (
                     <span style={{ fontSize: 11, color: '#f0883e', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                      ⏱️ {formatTimeAgo(proposal.newsPublishedAt)}
+                      ⏱️ {formatTimeAgo(t, proposal.newsPublishedAt)}
                     </span>
                   )}
                 </div>
