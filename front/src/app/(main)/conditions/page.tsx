@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getStocks } from '@/lib/api/stocks'
 import { getConditions, createCondition, updateCondition, updateConditionActive, deleteCondition } from '@/lib/api/conditions'
+import { getHistories } from '@/lib/api/assets'
 import type { TriggerType, BaseType, CompareType, ExecutionMode } from '@/types/conditions'
 
 // ─────────────────────────────────────────────────────────────
@@ -181,6 +182,11 @@ export default function ConditionsPage() {
   const { data: conditions = [] } = useQuery({
     queryKey: ['conditions'],
     queryFn: async () => (await getConditions()).data ?? [],
+  })
+  // queryKey는 OrderProposalModal의 반자동 체결 성공 시 invalidateQueries(['histories'])와 맞춘다.
+  const { data: histories = [] } = useQuery({
+    queryKey: ['histories'],
+    queryFn: async () => (await getHistories({ size: 20 })).data?.content ?? [],
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['conditions'] })
@@ -828,6 +834,53 @@ export default function ConditionsPage() {
             </div>
           </div>
         </div>
+
+        {/* ── 매매 이력 (api.md §3.3 GET /assets/histories) ── */}
+        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 20, marginTop: 24 }}>
+          <p style={{ fontSize: 12, color: MUTED, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: 1 }}>
+            {t('conditions.historyTitle')}
+          </p>
+          {histories.length === 0 ? (
+            <p style={{ color: MUTED, fontSize: 13 }}>{t('conditions.noHistoryHint')}</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ color: MUTED, textAlign: 'left', borderBottom: `1px solid ${BORDER}` }}>
+                    <th style={historyThStyle}>{t('conditions.historyStock')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyType')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyStatus')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyPrice')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyQuantity')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyTotal')}</th>
+                    <th style={historyThStyle}>{t('conditions.historyTime')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histories.map((h) => {
+                    const stock = stocks.find((s) => s.stockCode === h.stockCode)
+                    const statusColor = h.status === 'FILLED' ? '#3fb950' : h.status === 'FAILED' ? UP : MUTED
+                    return (
+                      <tr key={h.historyId} style={{ borderBottom: `1px solid ${BORDER}` }}>
+                        <td style={historyTdStyle}>{stock ? stock.stockName : h.stockCode}</td>
+                        <td style={{ ...historyTdStyle, color: h.orderType === 'BUY' ? UP : DOWN, fontWeight: 600 }}>
+                          {t(h.orderType === 'BUY' ? 'conditions.orderBuy' : 'conditions.orderSell')}
+                        </td>
+                        <td style={{ ...historyTdStyle, color: statusColor, fontWeight: 600 }}>
+                          {h.status === 'FAILED' && h.failureReason ? h.failureReason : t(`conditions.historyStatus${h.status}`)}
+                        </td>
+                        <td style={historyTdStyle}>{h.executionPrice != null ? `₩${h.executionPrice.toLocaleString()}` : '-'}</td>
+                        <td style={historyTdStyle}>{h.executionQuantity ?? '-'}</td>
+                        <td style={historyTdStyle}>{h.totalAmount != null ? `₩${h.totalAmount.toLocaleString()}` : '-'}</td>
+                        <td style={{ ...historyTdStyle, color: MUTED }}>{new Date(h.requestedAt).toLocaleString()}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -848,3 +901,5 @@ const aiPresetButtonStyle: React.CSSProperties = {
   padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
   border: '1px solid rgba(168, 85, 247, 0.4)', background: 'rgba(168, 85, 247, 0.08)', color: '#d8b4fe',
 }
+const historyThStyle: React.CSSProperties = { padding: '6px 10px', fontWeight: 600 }
+const historyTdStyle: React.CSSProperties = { padding: '8px 10px' }
