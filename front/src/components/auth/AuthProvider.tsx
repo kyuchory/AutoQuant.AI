@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, createContext, useContext, ReactNode, startTransition } from 'react';
+import { useEffect, useRef, useState, createContext, useContext, ReactNode, startTransition } from 'react';
 import axios from 'axios';
 import { useAuthStore } from '@/lib/store/authStore';
 import type { RefreshResponse } from '@/types/auth';
@@ -16,6 +16,10 @@ export const useAuthReady = () => useContext(AuthContext);
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const { accessToken, setAuth } = useAuthStore();
   const [isReady, setIsReady] = useState(false);
+  // React StrictMode(dev)는 마운트 시 effect를 두 번 실행한다. 이 refresh는 Rotation 방식이라
+  // 두 번째 호출이 항상 401로 실패하며 불필요한 요청/에러 로그가 생기므로, 같은 컴포넌트 인스턴스
+  // 안에서는 한 번만 실제로 호출되도록 막는다(ref는 리마운트 사이 재생성되므로 중복 방지 목적엔 충분).
+  const hasStartedRefreshRef = useRef(false);
 
   useEffect(() => {
     // 이미 accessToken이 메모리에 있으면 바로 통과
@@ -25,6 +29,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       });
       return;
     }
+
+    if (hasStartedRefreshRef.current) {
+      return;
+    }
+    hasStartedRefreshRef.current = true;
 
     // accessToken이 없으면 Refresh Token으로 복구 시도
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
