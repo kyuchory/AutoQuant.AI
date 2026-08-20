@@ -45,7 +45,7 @@ public class ChartService {
         String cached = redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             try {
-                return objectMapper.readValue(cached, ChartResponse.class);
+                return withLiveCurrentPrice(objectMapper.readValue(cached, ChartResponse.class), stockCode);
             } catch (Exception e) {
                 log.warn("차트 캐시 역직렬화 실패: key={}", cacheKey, e);
             }
@@ -122,23 +122,25 @@ public class ChartService {
         String cacheKey = CACHE_KEY_PREFIX + stockCode + ":minute";
         LocalTime now = LocalTime.now(KST);
         LocalTime marketClose = LocalTime.of(15, 30);
+        boolean afterClose = now.isAfter(marketClose);
 
-        if (now.isAfter(marketClose)) {
+        if (afterClose) {
             String cached = redisTemplate.opsForValue().get(cacheKey);
             if (cached != null) {
                 try {
-                    return objectMapper.readValue(cached, ChartResponse.class);
+                    // 장 마감 후 캐시라 분봉 자체는 이미 확정이지만, currentPrice/changeRate는
+                    // price:{stockCode}:current(웹소켓 실시간 갱신분)로 새로 덮어써 최신 상태를 반영한다.
+                    return withLiveCurrentPrice(objectMapper.readValue(cached, ChartResponse.class), stockCode);
                 } catch (Exception e) {
                     log.warn("분봉 캐시 역직렬화 실패", e);
                 }
             }
-            // 장 마감 후 캐시 미스 → KIS 호출 생략, 빈 응답 반환
-            return new ChartResponse(stockCode, stock.getStockName(), "MINUTE",
-                    0, 0, 0, 0, 0, 0, List.of());
+            // 장 마감 후 캐시 미스 → 완료된 세션(09:00~15:30)의 분봉을 KIS에서 재조회
         }
 
+        LocalTime sessionEnd = afterClose ? marketClose : now;
         List<String> hours = new ArrayList<>();
-        LocalTime current = LocalTime.of(Math.min(now.getHour(), 15), 0);
+        LocalTime current = LocalTime.of(Math.min(sessionEnd.getHour(), 15), 0);
         LocalTime start = LocalTime.of(9, 0);
         while (!current.isBefore(start)) {
             int minute = current.getMinute();
@@ -193,7 +195,7 @@ public class ChartService {
                 candles
         );
 
-        if (now.isAfter(marketClose)) {
+        if (afterClose) {
             long sec = LocalDateTime.of(today.plusDays(1), LocalTime.of(9, 0))
                     .atZone(KST).toEpochSecond() - Instant.now().getEpochSecond();
             try {
@@ -213,5 +215,40 @@ public class ChartService {
         } catch (Exception e) {
             return 0L;
         }
+    }
+
+    /**
+     * 캐시 히트 시에도 currentPrice/changeAmount/changeRate만은 price:{stockCode}:current(웹소켓
+     * 실시간 갱신분)로 새로 계산해 덮어쓴다. candles(봉 데이터) 자체는 캐시된 값을 그대로 쓴다 —
+     * 캐시 TTL 동안 갱신할 필요가 없는 값(D:10분~Y:24시간)이기 때문이다.
+     * 캐시된 candles가 비어 있으면 전일종가 기준 등락률을 계산할 수 없으므로 캐시값을 그대로 반환한다.
+     */
+    private ChartResponse withLiveCurrentPrice(ChartResponse cached, String stockCode) {
+        List<CandleItem> candles = cached.candles();
+        if (candles.isEmpty()) {
+            return cached;
+        }
+
+        long currentPrice = fetchCurrentPrice(stockCode);
+        if (currentPrice <= 0) {
+            return cached;
+        }
+
+        long changeAmount = 0;
+        double changeRate = 0;
+        if (candles.size() >= 2) {
+            long prevClose = candles.get(candles.size() - 2).close();
+            if (prevClose > 0) {
+                changeAmount = currentPrice - prevClose;
+                changeRate = (double) changeAmount / prevClose * 100;
+            }
+        }
+
+        return new ChartResponse(
+                cached.stockCode(), cached.stockName(), cached.periodCode(),
+                currentPrice, changeAmount, changeRate,
+                cached.openPrice(), cached.highPrice(), cached.lowPrice(),
+                candles
+        );
     }
 }

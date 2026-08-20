@@ -8,9 +8,11 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * KIS OAuth 인증 클라이언트 (Production)
@@ -23,10 +25,15 @@ import java.util.Map;
 @Component
 public class KisAuthClient {
 
+    private static final Duration CALL_TIMEOUT = Duration.ofSeconds(5);
+    private static final int MAX_RETRY = 5;
+    private static final Duration RETRY_DELAY = Duration.ofSeconds(60);
+
     private final StringRedisTemplate redisTemplate;
     private final WebClient webClient;
     private final String appKey;
     private final String appSecret;
+    private final AtomicInteger retryCount = new AtomicInteger(0);
 
     public KisAuthClient(
             StringRedisTemplate redisTemplate,
@@ -40,11 +47,26 @@ public class KisAuthClient {
         this.webClient = WebClient.builder().baseUrl(restBaseUrl).build();
     }
 
+    /** 재발급 없이 재사용할 수 있다고 볼 최소 남은 TTL (개발 중 잦은 재시작이 KIS rate limit에 걸리는 것을 방지) */
+    private static final long MIN_REUSABLE_TTL_SECONDS = 60;
+
     @PostConstruct
     public void init() {
+        if (hasValidCachedTokens()) {
+            log.info("🔑 Redis에 유효한 KIS 토큰이 이미 있어 재사용합니다 (재발급 스킵)");
+            return;
+        }
         log.info("🔑 KIS 인증 토큰 초기 발급 시작");
         issueTokens();
         log.info("🔑 KIS 인증 토큰 초기 발급 완료");
+    }
+
+    /** 서버 재시작 시 Redis에 아직 유효한 토큰/approval_key가 남아있는지 확인 */
+    private boolean hasValidCachedTokens() {
+        Long accessTtl = redisTemplate.getExpire(RedisKeys.kisAccessToken());
+        Long approvalTtl = redisTemplate.getExpire(RedisKeys.kisApprovalKey());
+        return accessTtl != null && accessTtl > MIN_REUSABLE_TTL_SECONDS
+                && approvalTtl != null && approvalTtl > MIN_REUSABLE_TTL_SECONDS;
     }
 
     /** 5.5시간(19800초) 주기로 토큰 갱신 (최초 120초 지연 → 초기 발급과 충돌 방지) */
@@ -55,6 +77,7 @@ public class KisAuthClient {
     }
 
     private void issueTokens() {
+        boolean success;
         try {
             // 1. Access Token 발급
             String accessToken = fetchAccessToken();
@@ -73,9 +96,24 @@ public class KisAuthClient {
                         Duration.ofSeconds(21000)); // 5시간 50분
                 log.info("✅ KIS Approval Key 발급 및 Redis 저장 완료");
             }
+            success = accessToken != null && approvalKey != null;
         } catch (Exception e) {
             log.error("❌ KIS 토큰 발급 실패: {}", e.getMessage());
+            success = false;
         }
+
+        if (success) {
+            retryCount.set(0);
+            return;
+        }
+
+        int attempt = retryCount.incrementAndGet();
+        if (attempt > MAX_RETRY) {
+            log.error("❌ KIS 토큰 발급 {}회 연속 실패 — 다음 정기 갱신 주기까지 재시도를 중단합니다.", attempt - 1);
+            return;
+        }
+        log.warn("⏳ KIS 토큰 발급 실패 — {}초 후 재시도 ({}/{})", RETRY_DELAY.getSeconds(), attempt, MAX_RETRY);
+        Mono.delay(RETRY_DELAY).subscribe(t -> issueTokens());
     }
 
     private String fetchAccessToken() {
@@ -91,6 +129,7 @@ public class KisAuthClient {
                     ))
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             if (response == null) return null;
@@ -118,6 +157,7 @@ public class KisAuthClient {
                     ))
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             if (response == null) return null;

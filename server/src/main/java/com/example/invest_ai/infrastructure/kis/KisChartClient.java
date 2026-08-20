@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,28 +26,36 @@ import java.util.Map;
 @Component
 public class KisChartClient {
 
+    private static final Duration CALL_TIMEOUT = Duration.ofSeconds(5);
+
     private final StringRedisTemplate redisTemplate;
     private final WebClient webClient;
     private final String appKey;
     private final String appSecret;
+    private final KisRateLimiter rateLimiter;
 
     public KisChartClient(
             StringRedisTemplate redisTemplate,
             @Value("${kis.api.rest-base-url}") String baseUrl,
             @Value("${kis.api.app-key}") String appKey,
-            @Value("${kis.api.app-secret}") String appSecret
+            @Value("${kis.api.app-secret}") String appSecret,
+            KisRateLimiter rateLimiter
     ) {
         this.redisTemplate = redisTemplate;
         this.appKey = appKey;
         this.appSecret = appSecret;
         this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+        this.rateLimiter = rateLimiter;
     }
 
-    /** KIS Access Token + 공통 헤더 빌드 */
+    /** KIS Access Token + 공통 헤더 빌드 (호출 전 레이트리밋 permit 획득) */
     private WebClient.RequestHeadersSpec<?> withAuth(String uri, String trId) {
         String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
         if (accessToken == null || accessToken.isEmpty()) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS Access Token이 없습니다.");
+        }
+        if (!rateLimiter.acquire()) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS API 호출 한도 초과 (잠시 후 재시도)");
         }
         return webClient.get()
                 .uri(uri)
@@ -79,6 +88,7 @@ public class KisChartClient {
             Map<String, Object> response = withAuth(uri, "FHKST03010100")
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             if (response != null) {
@@ -132,6 +142,7 @@ public class KisChartClient {
             Map<String, Object> response = withAuth(uri, "FHKST03010200")
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             if (response != null) {
@@ -179,6 +190,7 @@ public class KisChartClient {
             Map<String, Object> response = withAuth(uri, "FHKST01010100")
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             if (response != null) {

@@ -3,6 +3,7 @@ package com.example.invest_ai.infra;
 import com.example.invest_ai.global.error.CustomException;
 import com.example.invest_ai.global.error.ErrorCode;
 import com.example.invest_ai.infra.config.RedisKeys;
+import com.example.invest_ai.infrastructure.kis.KisChartClient;
 import com.example.invest_ai.infrastructure.redis.RedisPriceClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,9 @@ class RedisPriceClientTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private KisChartClient kisChartClient;
+
     @InjectMocks
     private RedisPriceClient redisPriceClient;
 
@@ -52,11 +56,12 @@ class RedisPriceClientTest {
     }
 
     @Test
-    @DisplayName("getCurrentPrice: Redis에 값이 없으면 CustomException 발생")
+    @DisplayName("getCurrentPrice: Redis에 값이 없고 KIS REST 폴백도 실패하면 CustomException 발생")
     void getCurrentPrice_값없음_CustomException발생() {
         // given
         given(redisTemplate.opsForValue()).willReturn(valueOperations);
         given(valueOperations.get(anyString())).willReturn(null);
+        given(kisChartClient.getCurrentQuote(anyString())).willReturn(null);
 
         // when & then
         assertThatThrownBy(() -> redisPriceClient.getCurrentPrice("005930"))
@@ -86,12 +91,13 @@ class RedisPriceClientTest {
     }
 
     @Test
-    @DisplayName("getAllCurrentPrices: Redis 값 없으면 BigDecimal.ZERO로 처리")
+    @DisplayName("getAllCurrentPrices: Redis 값 없고 KIS REST 폴백도 실패하면 BigDecimal.ZERO로 처리")
     void getAllCurrentPrices_일부종목없음_ZERO처리() {
         // given
         given(redisTemplate.opsForValue()).willReturn(valueOperations);
         given(valueOperations.get(RedisKeys.priceCurrent("005930"))).willReturn("79500.0000");
         given(valueOperations.get(RedisKeys.priceCurrent("000660"))).willReturn(null);
+        given(kisChartClient.getCurrentQuote("000660")).willReturn(null);
 
         // when
         Map<String, BigDecimal> prices = redisPriceClient.getAllCurrentPrices(

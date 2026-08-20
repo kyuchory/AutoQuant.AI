@@ -1,5 +1,7 @@
 package com.example.invest_ai.infra.config;
 
+import java.time.Duration;
+
 /**
  * Redis 키 네이밍 컨벤션: {domain}:{sub-domain?}:{identifier}:{data-type}
  *
@@ -31,10 +33,19 @@ public final class RedisKeys {
     private static final String TYPE_PRICE_CHANGE_RATE = "changeRate";
 
     /**
+     * price:{stockCode}:current 값의 TTL.
+     * 웹소켓이 매 틱마다 덮어쓰는 것이 정상 흐름이지만, 구독 실패/연결 끊김으로
+     * 갱신이 멈췄을 때 오래된 값이 영구히 남는 것을 막기 위해 만료 시간을 둔다.
+     * 만료되면 다음 조회 시 RedisPriceClient의 REST 폴백이 자동으로 최신값을 채운다.
+     */
+    public static final Duration PRICE_CURRENT_TTL = Duration.ofMinutes(3);
+
+    /**
      * 실시간 현재 체결가 키를 반환합니다.
      * Writer: KisWebsocketClient
      * Reader: AssetSummaryService, 조건 매칭 워커
-     * TTL: 없음 (KIS Websocket이 체결가 수신 시마다 SET으로 덮어씀)
+     * TTL: {@link #PRICE_CURRENT_TTL} (KIS Websocket이 체결가 수신 시마다 SET으로 갱신하며,
+     *      갱신이 끊기면 만료 후 RedisPriceClient의 REST 폴백으로 복구된다)
      */
     public static String priceCurrent(String stockCode) {
         return key(DOMAIN_PRICE, stockCode, TYPE_PRICE_CURRENT);
@@ -48,6 +59,21 @@ public final class RedisKeys {
      */
     public static String priceChangeRate(String stockCode) {
         return key(DOMAIN_PRICE, stockCode, TYPE_PRICE_CHANGE_RATE);
+    }
+
+    /**
+     * price:{stockCode}:current 저장값 포맷을 문서 규격에 맞춘다.
+     * redisflow.md §2.1: "값은 소수점 4자리까지 문자열로 저장 (테이블의 DECIMAL(18,4)와 정밀도 일치)".
+     * KIS 응답(체결가)은 정수 문자열(예: "79500")로 오므로, Redis에 SET하는 모든 지점에서
+     * 이 메서드를 거쳐 "79500.0000" 형태로 통일한다.
+     */
+    public static String formatPrice(String rawPrice) {
+        return formatPrice(new java.math.BigDecimal(rawPrice));
+    }
+
+    /** {@link #formatPrice(String)}의 BigDecimal 오버로드. */
+    public static String formatPrice(java.math.BigDecimal rawPrice) {
+        return rawPrice.setScale(4, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     // ========================================================================

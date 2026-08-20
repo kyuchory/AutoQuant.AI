@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
@@ -24,6 +25,8 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * KIS WebSocket 실시간 시세 수집 클라이언트 (Production)
@@ -44,8 +47,13 @@ public class KisWebsocketClient {
     private final String websocketEndpoint;
     private final ApplicationEventPublisher eventPublisher;
 
+    /** 데이터 미수신 감지용 하트비트 임계값 (구독은 성공했으나 조용히 끊긴 경우 대비) */
+    private static final Duration STALE_DATA_THRESHOLD = Duration.ofSeconds(60);
+
     private Disposable connection;
     private volatile boolean running = true;
+    private final AtomicLong lastMessageAt = new AtomicLong(System.currentTimeMillis());
+    private final AtomicBoolean reconnecting = new AtomicBoolean(false);
 
     public KisWebsocketClient(
             StringRedisTemplate redisTemplate,
@@ -78,6 +86,35 @@ public class KisWebsocketClient {
         log.info("🛑 KIS WebSocket 시세 수집기 종료");
     }
 
+    /**
+     * 연결은 살아있지만 구독이 조용히 끊겨 데이터가 안 들어오는 상태를 감지한다.
+     * (연결 종료/에러 콜백에만 의존하는 재연결 로직은 이 케이스를 놓치므로 별도 감시가 필요)
+     */
+    @Scheduled(fixedRate = 30000)
+    public void checkConnectionHealth() {
+        if (!running) return;
+        long idleMs = System.currentTimeMillis() - lastMessageAt.get();
+        if (idleMs > STALE_DATA_THRESHOLD.toMillis()) {
+            log.warn("⚠️ {}초간 KIS 시세 데이터 미수신 — 강제 재연결", idleMs / 1000);
+            forceReconnect();
+        }
+    }
+
+    private void forceReconnect() {
+        if (!reconnecting.compareAndSet(false, true)) {
+            return; // 이미 재연결 진행 중
+        }
+        try {
+            if (connection != null && !connection.isDisposed()) {
+                connection.dispose();
+            }
+            lastMessageAt.set(System.currentTimeMillis());
+            connect();
+        } finally {
+            reconnecting.set(false);
+        }
+    }
+
     private void connect() {
         String approvalKey = redisTemplate.opsForValue().get(RedisKeys.kisApprovalKey());
         if (approvalKey == null || approvalKey.isEmpty()) {
@@ -104,6 +141,7 @@ public class KisWebsocketClient {
                 URI.create(wsUri),
                 session -> {
                     log.info("✅ KIS WebSocket 연결 성공: session={}", session.getId());
+                    lastMessageAt.set(System.currentTimeMillis());
 
                     // 모든 구독 종목에 대해 구독 메시지 전송
                     return session.send(
@@ -145,6 +183,7 @@ public class KisWebsocketClient {
     }
 
     private void handleMessage(String payload) {
+        lastMessageAt.set(System.currentTimeMillis());
         log.debug("📩 [KIS RAW] {}", payload.substring(0, Math.min(300, payload.length())));
         try {
             // "\u0000" prefix 제거 (KIS WebSocket 특이사항)
@@ -178,9 +217,17 @@ public class KisWebsocketClient {
                         return;
                     }
                 }
-                // body.rt_cd 체크
-                String rtCd = String.valueOf(body.getOrDefault("rt_cd", ""));
-                if ("0".equals(rtCd)) return;
+                // body.rt_cd 체크 (구독 확인/거부 응답) — 실패 시 명시적으로 로그를 남긴다.
+                if (body != null && body.containsKey("rt_cd")) {
+                    String rtCd = String.valueOf(body.getOrDefault("rt_cd", ""));
+                    if ("0".equals(rtCd)) {
+                        log.info("✅ KIS 구독 확인: {}", body.get("msg1"));
+                    } else {
+                        log.error("❌ KIS 구독 거부: rt_cd={}, msg={} — 재연결을 트리거합니다.", rtCd, body.get("msg1"));
+                        forceReconnect();
+                    }
+                    return;
+                }
             }
 
             // 2. 직접 output 필드가 있는 경우 (실시간 데이터 바로 옴)
@@ -215,10 +262,10 @@ public class KisWebsocketClient {
 
     private void processPipeData(String payload) {
         try {
-            // KIS H0STCNT0 pipe 필드 (실제 데이터 검증 완료):
+            // KIS H0STCNT0 pipe 필드 (docs/kisflow.md §4와 동기화됨):
             // fields[0]=MKSC_SHRN_ISCD, [1]=STCK_CNTG_HOUR, [2]=STCK_PRPR(체결가),
-            // [3]=PRDY_VRSS_SIGN(전일대비부호: 2=상승, 5=하락),
-            // [5]=PRDY_CTRT(등락률), [12]=CNTG_VOL(체결량), [13]=ACML_VOL(누적거래량)
+            // [5]=PRDY_CTRT(등락률), [9]=CNTG_VOL(체결량), [12]=PRDY_VRSS_SIGN(전일대비부호),
+            // [13]=ACML_VOL(누적거래량), [21]=CCLD_DVSN(매수/매도 구분: 1=매수, 5=매도)
             String[] parts = payload.split("\\|");
             if (parts.length >= 4 && "H0STCNT0".equals(parts[1])) {
                 String[] fields = parts[3].split("\\^");
@@ -226,23 +273,14 @@ public class KisWebsocketClient {
                     String stockCode = fields[0];
                     String timeStr   = fields.length > 1 ? fields[1] : "";          // 체결시간 HHMMSS
                     String priceStr  = fields[2];                                   // 체결가
-                    String sign      = fields.length > 21 ? fields[21] : "5";       // 매수/매도 구분 (1:매수, 5:매도)
+                    String sign      = fields.length > 21 ? fields[21] : "5";       // 매수/매도 구분 CCLD_DVSN (1:매수, 5:매도)
                     String changeStr = fields.length > 5 ? fields[5] : "0";         // 등락률 PRDY_CTRT
-                    String volumeStr = fields.length > 12 ? fields[12] : "0";       // 체결량 CNTG_VOL
-
-                    // 디버그 로그: 실제 KIS pipe 필드 인덱스 확인용
-                    log.debug("📊 [PIPE DEBUG] stock={}, fields[3]={}, fields[10]={}, fields[11]={}, fields[21]={}, fields[22]={}, fields[23]={}",
-                            stockCode,
-                            fields.length > 3 ? fields[3] : "N/A",
-                            fields.length > 10 ? fields[10] : "N/A",
-                            fields.length > 11 ? fields[11] : "N/A",
-                            fields.length > 21 ? fields[21] : "N/A",
-                            fields.length > 22 ? fields[22] : "N/A",
-                            fields.length > 23 ? fields[23] : "N/A");
+                    String volumeStr = fields.length > 9 ? fields[9] : "0";         // 체결량 CNTG_VOL
                     String acmlVol   = fields.length > 13 ? fields[13] : "0";       // 누적거래량 ACML_VOL
 
-                    // Redis 현재가 + 등락률 저장
-                    redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), priceStr);
+                    // Redis 현재가 + 등락률 저장 (redisflow.md §2.1: 소수점 4자리 문자열로 통일)
+                    redisTemplate.opsForValue().set(
+                            RedisKeys.priceCurrent(stockCode), RedisKeys.formatPrice(priceStr), RedisKeys.PRICE_CURRENT_TTL);
                     redisTemplate.opsForValue().set(RedisKeys.priceChangeRate(stockCode), changeStr);
 
                     // 조건 매칭 엔진 트리거
@@ -259,7 +297,8 @@ public class KisWebsocketClient {
                     Map<String, Object> priceTick = Map.of(
                             "stockCode", stockCode,
                             "currentPrice", currentPrice,
-                            "changeRate", changeRate
+                            "changeRate", changeRate,
+                            "volume", volume
                     );
                     sessionManager.broadcast("PRICE_TICK", priceTick);
 
@@ -272,7 +311,7 @@ public class KisWebsocketClient {
                             "changeRate", changeRate,
                             "accumulatedVolume", accumulatedVolume,
                             "time", formattedTime,
-                            "sign", sign  // "2"=상승(매수, 빨강), "5"=하한(매도, 파랑), "4"=하락, "3"=상한
+                            "sign", sign  // CCLD_DVSN(체결구분): "1"=매수(빨강), "5"=매도(파랑)
                     );
                     sessionManager.broadcast("EXECUTION", execution);
                 }
@@ -299,7 +338,8 @@ public class KisWebsocketClient {
         String stockCode = output.get("MKSC_SHRN_ISCD");
         String price = output.get("STCK_PRPR");
         if (stockCode != null && price != null && !price.isEmpty()) {
-            redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), price);
+            redisTemplate.opsForValue().set(
+                    RedisKeys.priceCurrent(stockCode), RedisKeys.formatPrice(price), RedisKeys.PRICE_CURRENT_TTL);
             publishPriceUpdated(stockCode, price);
         }
     }
@@ -309,7 +349,8 @@ public class KisWebsocketClient {
         String stockCode = String.valueOf(map.get("MKSC_SHRN_ISCD"));
         String price = String.valueOf(map.get("STCK_PRPR"));
         if (stockCode != null && price != null && !price.isEmpty() && !"null".equals(price)) {
-            redisTemplate.opsForValue().set(RedisKeys.priceCurrent(stockCode), price);
+            redisTemplate.opsForValue().set(
+                    RedisKeys.priceCurrent(stockCode), RedisKeys.formatPrice(price), RedisKeys.PRICE_CURRENT_TTL);
             publishPriceUpdated(stockCode, price);
         }
     }

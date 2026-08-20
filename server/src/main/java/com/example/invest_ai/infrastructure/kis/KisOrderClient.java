@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.Map;
 
 /**
@@ -24,12 +25,15 @@ import java.util.Map;
 @Component
 public class KisOrderClient {
 
+    private static final Duration CALL_TIMEOUT = Duration.ofSeconds(5);
+
     private final StringRedisTemplate redisTemplate;
     private final WebClient webClient;
     private final String appKey;
     private final String appSecret;
     private final String accountNo;
     private final String accountPrdtCd;
+    private final KisRateLimiter rateLimiter;
 
     public KisOrderClient(
             StringRedisTemplate redisTemplate,
@@ -37,13 +41,15 @@ public class KisOrderClient {
             @Value("${kis.api.app-key}") String appKey,
             @Value("${kis.api.app-secret}") String appSecret,
             @Value("${kis.api.account-no}") String accountNo,
-            @Value("${kis.api.account-prdt-cd}") String accountPrdtCd
+            @Value("${kis.api.account-prdt-cd}") String accountPrdtCd,
+            KisRateLimiter rateLimiter
     ) {
         this.redisTemplate = redisTemplate;
         this.appKey = appKey;
         this.appSecret = appSecret;
         this.accountNo = accountNo;
         this.accountPrdtCd = accountPrdtCd;
+        this.rateLimiter = rateLimiter;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .build();
@@ -64,6 +70,9 @@ public class KisOrderClient {
         String accessToken = redisTemplate.opsForValue().get(RedisKeys.kisAccessToken());
         if (accessToken == null || accessToken.isEmpty()) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS Access Token이 없습니다.");
+        }
+        if (!rateLimiter.acquire()) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, "KIS API 호출 한도 초과 (잠시 후 재시도)");
         }
 
         String trId = "BUY".equalsIgnoreCase(orderType) ? "VTTC0802U" : "VTTC0801U";
@@ -93,6 +102,7 @@ public class KisOrderClient {
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(Map.class)
+                    .timeout(CALL_TIMEOUT)
                     .block();
 
             log.info("← KIS 주문 응답: {}", response);
