@@ -2,11 +2,10 @@
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useMutation } from '@tanstack/react-query'
-import apiClient from '@/lib/api/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { createOrder } from '@/lib/api/assets'
 import { createCondition } from '@/lib/api/conditions'
-import type { ApiResponse } from '@/types/api'
-import type { OrderResponse } from '@/types/assets'
+import type { OrderRequest, OrderResponse } from '@/types/assets'
 
 interface TradingPanelProps {
   stockCode: string
@@ -20,6 +19,7 @@ type Mode = 'MARKET' | 'LIMIT' | 'STOP'
 
 export default function TradingPanel({ stockCode, stockName, currentPrice }: TradingPanelProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('BUY')
   const [mode, setMode] = useState<Mode>('MARKET')
   const [orderPrice, setOrderPrice] = useState<string>('')      // LIMIT: 주문가 / STOP: 감시가
@@ -36,6 +36,9 @@ export default function TradingPanel({ stockCode, stockName, currentPrice }: Tra
       setError(t('trading.conditionRegistered'))
       setOrderPrice('')
       setStopLimitPrice('')
+      // 대시보드에서 등록해도 이미 열려있는 /conditions 페이지가 즉시 반영되도록 캐시 무효화
+      // (conditions/page.tsx의 등록 뮤테이션과 동일한 queryKey를 맞춘다)
+      queryClient.invalidateQueries({ queryKey: ['conditions'] })
     },
     onError: (e: Error) => setError(e.message),
   })
@@ -57,7 +60,7 @@ export default function TradingPanel({ stockCode, stockName, currentPrice }: Tra
     setError(null)
 
     try {
-      const body: Record<string, string | number> = {
+      const body: OrderRequest = {
         stockCode,
         orderType,
         quantity,
@@ -67,8 +70,8 @@ export default function TradingPanel({ stockCode, stockName, currentPrice }: Tra
         body.price = Number(orderPrice)
       }
 
-      const response = await apiClient.post<ApiResponse<OrderResponse>>('/assets/orders', body)
-      const data = response.data.data
+      const response = await createOrder(body)
+      const data = response.data
       if (data) {
         setResult(data)
         if (data.status === 'FAILED') {
