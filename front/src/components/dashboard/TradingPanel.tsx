@@ -11,13 +11,16 @@ interface TradingPanelProps {
   stockCode: string
   stockName: string
   currentPrice: number
+  dayHigh?: number
+  dayLow?: number
+  changeRate?: number
 }
 
 const RATIO_OPTIONS = [10, 25, 50, 100] as const
 
 type Mode = 'MARKET' | 'LIMIT' | 'STOP'
 
-export default function TradingPanel({ stockCode, stockName, currentPrice }: TradingPanelProps) {
+export default function TradingPanel({ stockCode, stockName, currentPrice, dayHigh, dayLow, changeRate }: TradingPanelProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('BUY')
@@ -119,29 +122,51 @@ export default function TradingPanel({ stockCode, stockName, currentPrice }: Tra
     ? t('conditions.startWatch')
     : `${t(`trading.${orderType.toLowerCase()}`)} ${quantity}${t('trading.shares')}`
 
+  const trendColor = changeRate === undefined ? '#58a6ff' : changeRate > 0 ? '#ef5350' : changeRate < 0 ? '#1976d2' : '#8b949e'
+  const rangePct = dayHigh && dayLow && dayHigh > dayLow
+    ? Math.min(100, Math.max(0, ((currentPrice - dayLow) / (dayHigh - dayLow)) * 100))
+    : null
+
   return (
     <div style={{
       background: '#161b22',
       border: '1px solid #1e2533',
-      borderRadius: 8,
+      borderRadius: 14,
       padding: '20px',
       color: '#c9d1d9',
       fontFamily: 'system-ui, -apple-system, sans-serif'
     }}>
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f0f6fc', margin: '0 0 16px 0' }}>
-        {stockName} ({stockCode})
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f0f6fc', margin: '0 0 12px 0' }}>
+        {stockName} <span style={{ color: '#6b7280', fontWeight: 400 }}>{stockCode}</span>
       </h3>
 
       {/* 현재가 */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 16, padding: '8px 12px', background: 'rgba(88,166,255,0.05)', borderRadius: 6
-      }}>
-        <span style={{ fontSize: 12, color: '#8b949e' }}>{t('trading.currentPrice')}</span>
-        <span style={{ fontSize: 16, fontWeight: 700, color: '#58a6ff' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
+        <span style={{ fontSize: 22, fontWeight: 800, color: trendColor, fontFamily: 'monospace', letterSpacing: '-0.02em' }}>
           ₩{currentPrice.toLocaleString()}
         </span>
+        {changeRate !== undefined && (
+          <span style={{ fontSize: 13, fontWeight: 700, color: trendColor, fontFamily: 'monospace' }}>
+            {changeRate > 0 ? '+' : ''}{changeRate.toFixed(2)}%
+          </span>
+        )}
       </div>
+
+      {/* 당일 등락 범위 */}
+      {rangePct !== null && (
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ position: 'relative', height: 4, borderRadius: 2, background: 'linear-gradient(90deg, #1976d2, #30363d, #ef5350)' }}>
+            <div style={{
+              position: 'absolute', top: -3, left: `${rangePct}%`, transform: 'translateX(-50%)',
+              width: 10, height: 10, borderRadius: '50%', background: '#f0f6fc', border: '2px solid #161b22'
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: '#1976d2', fontFamily: 'monospace' }}>{t('chart.low')} {dayLow?.toLocaleString()}</span>
+            <span style={{ fontSize: 10, color: '#ef5350', fontFamily: 'monospace' }}>{t('chart.high')} {dayHigh?.toLocaleString()}</span>
+          </div>
+        </div>
+      )}
 
       {/* BUY/SELL 탭 */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
