@@ -39,13 +39,21 @@ public class AuthService {
     private static final BigDecimal INITIAL_BALANCE = new BigDecimal("5000000.0000");
 
     /**
-     * POST /api/v1/auth/login — 카카오 OAuth 로그인
+     * POST /api/v1/auth/login — 소셜 OAuth 로그인
+     *
+     * api.md §2.1: provider는 GOOGLE|KAKAO를 지원하며 미지원 provider는 E4001을 반환한다.
+     * 현재 KAKAO 클라이언트만 구현돼 있으므로(infrastructure/kakao), GOOGLE 등 다른 값은
+     * "지원 안 함"으로 명시적으로 거부한다 — 예전엔 provider를 무시하고 항상 카카오로 시도해
+     * GOOGLE 요청이 예기치 않은 카카오 API 예외로 흘러갔었다.
      */
     @Transactional
-    public LoginResponse login(String code) {
-        log.info("→ AuthService.login()");
+    public LoginResponse login(String provider, String code) {
+        log.info("→ AuthService.login(provider={})", provider);
 
-        if (!"KAKAO".equals(code) && code != null) { /* 실제 code값 사용 */ }
+        if (!"KAKAO".equals(provider)) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE, "지원하지 않는 provider입니다: " + provider);
+        }
+
         // 1. 인가 코드 → 카카오 Access Token
         KakaoTokenResponse token = kakaoAuthClient.exchangeToken(code);
 

@@ -219,7 +219,7 @@ class AuthServiceTest {
         log.info("======================================================");
 
         // 카카오 로그인 실행 (인가 코드 → 카카오 토큰 → 사용자 정보 → DB 저장 → JWT 발급)
-        var response = authService.login(realAuthCode);
+        var response = authService.login("KAKAO", realAuthCode);
 
         // 검증
         assertNotNull(response);

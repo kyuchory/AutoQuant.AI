@@ -8,6 +8,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,13 +25,16 @@ public class AuthController {
     private final AuthService authService;
     private final JwtProvider jwtTokenProvider;
 
+    @Value("${app.cookie.secure:false}")
+    private boolean cookieSecure;
+
     /** POST /api/v1/auth/login — 카카오 OAuth 로그인 */
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(
             @RequestBody LoginRequest request,
             HttpServletResponse response
     ) {
-        LoginResponse loginResponse = authService.login(request.code());
+        LoginResponse loginResponse = authService.login(request.provider(), request.code());
 
         // Refresh Token → HttpOnly Secure SameSite Lax Cookie
         setRefreshTokenCookie(response, loginResponse.refreshToken());
@@ -61,17 +65,22 @@ public class AuthController {
 
         // 쿠키 제거
         ResponseCookie deleteCookie = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true).secure(false).sameSite("Lax").path("/").maxAge(0).build();
+                .httpOnly(true).secure(cookieSecure).sameSite(cookieSecure ? "Strict" : "Lax").path("/").maxAge(0).build();
         response.addHeader("Set-Cookie", deleteCookie.toString());
         return ApiResponse.success(null);
     }
 
-    /** Refresh Token 쿠키 설정 */
+    /**
+     * Refresh Token 쿠키 설정.
+     * api.md §2.1은 Secure/SameSite=Strict를 명시하지만, Secure는 HTTPS에서만 전송되므로
+     * 로컬 개발(HTTP)에서는 app.cookie.secure=false(application.yml 기본값)로 완화한다.
+     * Secure가 꺼진 상태에서 Strict까지 걸면 배포 전환 시 혼동을 줄 수 있어 secure 여부에 맞춰 SameSite도 같이 오간다.
+     */
     private void setRefreshTokenCookie(HttpServletResponse response, String token) {
         ResponseCookie cookie = ResponseCookie.from("refreshToken", token)
                 .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
+                .secure(cookieSecure)
+                .sameSite(cookieSecure ? "Strict" : "Lax")
                 .path("/")
                 .maxAge(1209600) // 14일
                 .build();

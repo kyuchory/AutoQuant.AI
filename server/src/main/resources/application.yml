@@ -4,6 +4,13 @@
 server:
   port: 8080
 
+# refreshToken 쿠키 Secure 속성. api.md §2.1은 Secure/SameSite=Strict를 명시하지만,
+# 로컬 개발은 http://localhost라 Secure=true면 쿠키가 아예 전송되지 않는다.
+# 배포 환경(HTTPS)에서는 반드시 true로 오버라이드할 것 (예: -Dapp.cookie.secure=true 또는 프로덕션 프로파일).
+app:
+  cookie:
+    secure: false
+
 spring:
   application:
     name: invest-ai
