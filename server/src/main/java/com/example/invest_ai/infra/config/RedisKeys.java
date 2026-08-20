@@ -176,6 +176,51 @@ public final class RedisKeys {
     }
 
     // ========================================================================
+    // 7-2. AI 리포트 새로고침 레이트리미터: rate:report:refresh:{stockCode}
+    // (api.md §5.4 E4290 — 동일 종목 중복 새로고침 방지)
+    // ========================================================================
+    private static final String SUB_RATE_REPORT = "report";
+    private static final String TYPE_RATE_REFRESH = "refresh";
+
+    /**
+     * AI 리포트 새로고침 레이트리밋 키를 반환합니다.
+     * Writer/Reader: ReportController.refreshReport() (SET NX EX 30)
+     * TTL: 30초
+     * Value: "1"
+     */
+    public static String rateReportRefresh(String stockCode) {
+        return key(DOMAIN_RATE, SUB_RATE_REPORT + ":" + TYPE_RATE_REFRESH, stockCode);
+    }
+
+    // ========================================================================
+    // 7-3. 자동매매 체결 실패 재시도: rate:condition:retryCount:{conditionId} / rate:condition:backoff:{conditionId}
+    // (clinerules.md §4.2 — "재시도 정책(최대 횟수, 백오프)을 Consumer에 명시" 요건 충족.
+    //  ConditionMatchingEngine이 별도 재시도 큐 없이 이 두 키로 최대 횟수+백오프를 직접 구현한다.)
+    // ========================================================================
+    private static final String SUB_RATE_CONDITION = "condition";
+    private static final String TYPE_RATE_RETRY_COUNT = "retryCount";
+    private static final String TYPE_RATE_BACKOFF = "backoff";
+
+    /**
+     * 조건별 체결 실패 누적 횟수 키를 반환합니다.
+     * Writer/Reader: ConditionMatchingEngine.execute() (INCR, TTL 5분로 실패 윈도우 제한)
+     * Value: 실패 횟수(문자열 정수)
+     */
+    public static String rateConditionRetryCount(Long conditionId) {
+        return key(DOMAIN_RATE, SUB_RATE_CONDITION + ":" + TYPE_RATE_RETRY_COUNT, String.valueOf(conditionId));
+    }
+
+    /**
+     * 조건별 재시도 백오프 키를 반환합니다. 존재하는 동안은 같은 조건을 다시 시도하지 않는다
+     * (시세 틱마다 재평가되는 조건이 실패 직후 매 틱 재시도하며 KIS를 두들기는 것을 방지).
+     * Writer/Reader: ConditionMatchingEngine.execute() (SET NX EX 10)
+     * TTL: 10초
+     */
+    public static String rateConditionBackoff(Long conditionId) {
+        return key(DOMAIN_RATE, SUB_RATE_CONDITION + ":" + TYPE_RATE_BACKOFF, String.valueOf(conditionId));
+    }
+
+    // ========================================================================
     // 8. KIS 전역 레이트리미터: rate:kis:global:orderCount:{epochSecond}
     // ========================================================================
     private static final String SUB_RATE_KIS = "kis";

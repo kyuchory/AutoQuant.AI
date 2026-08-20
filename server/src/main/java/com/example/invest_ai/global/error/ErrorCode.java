@@ -43,7 +43,8 @@ public enum ErrorCode {
 
     // Report
     REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "리포트를 찾을 수 없습니다."),
-    REPORT_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "리포트 생성에 실패했습니다.");
+    REPORT_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "리포트 생성에 실패했습니다."),
+    REPORT_REFRESH_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "동일 종목은 30초에 한 번만 새로고침할 수 있습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;

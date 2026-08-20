@@ -8,6 +8,7 @@ import com.example.invest_ai.domain.stock.entity.Stock;
 import com.example.invest_ai.domain.stock.repository.StockRepository;
 import com.example.invest_ai.domain.user.entity.User;
 import com.example.invest_ai.domain.user.repository.UserRepository;
+import com.example.invest_ai.global.websocket.WebSocketSessionManager;
 import com.example.invest_ai.infra.config.RedisKeys;
 import com.example.invest_ai.infra.converter.FloatArrayToByteArrayConverter;
 import com.example.invest_ai.infra.openai.OpenAiClient;
@@ -23,6 +24,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -43,6 +45,10 @@ public class ReportWorker {
     private final UserRepository userRepository;
     private final OpenAiClient openAiClient;
     private final RedisTemplate<String, String> redisTemplate;
+    private final WebSocketSessionManager webSocketSessionManager;
+
+    /** OpenAiClient.generateReport()가 실패 시 반환하는 플레이스홀더 — 이 문자열이면 저장/캐싱/알림을 하지 않는다 */
+    private static final String GENERATION_FAILURE_MARKER = "리포트 생성에 실패했습니다. 잠시 후 다시 시도해주세요.";
 
     @RabbitListener(queues = "report-queue")
     public void handleReport(ReportMessage message) {
@@ -125,6 +131,13 @@ public class ReportWorker {
             // ④ G: OpenAI Chat API → 리포트 생성
             String reportContent = openAiClient.generateReport(prompt);
 
+            // OpenAiClient가 호출 실패 시 던지지 않고 플레이스홀더 문자열을 반환하므로,
+            // 이 경우 "성공한 척" 저장/캐싱/알림하지 않고 기존 리포트를 그대로 유지한다.
+            if (GENERATION_FAILURE_MARKER.equals(reportContent)) {
+                log.error("[리포트 워커] OpenAI 생성 실패로 리포트 갱신 중단: stock={}", stockCode);
+                return;
+            }
+
             // JSON에 createdAt 필드 추가 (Redis/DB 일관성 확보)
             try {
                 ObjectMapper mapper = new ObjectMapper();
@@ -148,6 +161,11 @@ public class ReportWorker {
             String cacheKey = RedisKeys.reportText(stockCode);
             redisTemplate.opsForValue().set(cacheKey, reportContent, Duration.ofHours(12));
             log.info("[리포트 워커] Redis 캐싱 완료: {}", cacheKey);
+
+            // ⑦ WebSocket으로 생성 완료 알림 (api.md §6.2 REPORT_READY)
+            // 리포트는 종목 단위 데이터라 특정 유저 세션이 아닌 전체 접속자에게 브로드캐스트한다.
+            webSocketSessionManager.broadcast("REPORT_READY",
+                    Map.of("stockCode", stockCode, "reportId", report.getReportId()));
 
         } catch (Exception e) {
             log.error("[리포트 워커] 리포트 생성 실패: stock={} error={}", stockCode, e.getMessage());
