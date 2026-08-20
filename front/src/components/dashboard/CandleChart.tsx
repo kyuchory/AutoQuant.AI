@@ -7,9 +7,15 @@ import { getDailyChart, getMinuteChart } from '@/lib/api/charts'
 import { useChartStore } from '@/lib/store/chartStore'
 import type { PeriodCode } from '@/types/chart'
 
+export interface ChartHeaderData {
+  currentPrice: number; changeAmount: number; changeRate: number
+  openPrice: number; highPrice: number; lowPrice: number
+}
+
 interface CandleChartProps {
   stockCode: string
   stockName: string
+  onHeaderUpdate?: (data: ChartHeaderData) => void
 }
 
 const PERIOD_TABS: { labelKey: string; code: PeriodCode }[] = [
@@ -20,7 +26,7 @@ const PERIOD_TABS: { labelKey: string; code: PeriodCode }[] = [
   { labelKey: 'chart.periodYear', code: 'Y' },
 ]
 
-export default function CandleChart({ stockCode, stockName }: CandleChartProps) {
+export default function CandleChart({ stockCode, stockName, onHeaderUpdate }: CandleChartProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null)
@@ -40,6 +46,12 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
 
   // 이 종목의 시세만 구독 — 다른 종목 틱으로 인한 불필요한 리렌더 방지
   const priceData = useChartStore((s) => s.prices[stockCode])
+  const onHeaderUpdateRef = useRef(onHeaderUpdate)
+  useEffect(() => { onHeaderUpdateRef.current = onHeaderUpdate }, [onHeaderUpdate])
+
+  useEffect(() => {
+    if (headerData) onHeaderUpdateRef.current?.(headerData)
+  }, [headerData])
 
   // 초기화
   useEffect(() => {
@@ -57,7 +69,7 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
       rightPriceScale: { borderColor: '#1e2533', textColor: '#787b86' },
       timeScale: { borderColor: '#1e2533', timeVisible: true, secondsVisible: false },
       width: containerRef.current.clientWidth,
-      height: 480,
+      height: 540,
     })
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -74,14 +86,18 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
     candleSeriesRef.current = candleSeries
     volumeSeriesRef.current = volumeSeries
 
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth })
+    // window resize뿐 아니라 사이드바 드래그 등 컨테이너 자체의 폭 변화도 반영해야
+    // 캔버스가 컨테이너보다 넓게 남아 잘려 보이는(overflow) 문제가 생기지 않는다.
+    const resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width && chartRef.current) {
+        chartRef.current.applyOptions({ width })
       }
-    }
-    window.addEventListener('resize', handleResize)
+    })
+    resizeObserver.observe(containerRef.current)
+
     return () => {
-      window.removeEventListener('resize', handleResize)
+      resizeObserver.disconnect()
       if (chartRef.current) {
         chartRef.current.remove()
         chartRef.current = null
@@ -217,40 +233,48 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
   const changeSign = headerData && headerData.changeRate >= 0 ? '+' : ''
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, background: '#0d1117' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, background: '#0d1117', borderRadius: 12, border: '1px solid #1e2533', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ padding: '12px 16px', display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap', borderBottom: '1px solid #1e2533' }}>
-        <span style={{ color: '#d1d4dc', fontWeight: 700, fontSize: '1rem' }}>{stockName}</span>
+      <div style={{ padding: '18px 20px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ color: '#f0f6fc', fontWeight: 700, fontSize: '1.05rem' }}>{stockName}</span>
+          <span style={{ color: '#6b7280', fontSize: '0.75rem', fontFamily: 'monospace' }}>{stockCode}</span>
+        </div>
         {headerData && (
           <>
-            <span style={{ color: changeColor, fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 700 }}>
-              {headerData.currentPrice.toLocaleString('ko-KR')}
-            </span>
-            <span style={{ color: changeColor, fontFamily: 'monospace', fontSize: '0.85rem' }}>
-              {changeSign}{headerData.changeRate.toFixed(2)}%
-            </span>
-            <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              {t('chart.open')} {headerData.openPrice.toLocaleString('ko-KR')}
-            </span>
-            <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              {t('chart.high')} {headerData.highPrice.toLocaleString('ko-KR')}
-            </span>
-            <span style={{ color: '#787b86', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-              {t('chart.low')} {headerData.lowPrice.toLocaleString('ko-KR')}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}>
+              <span style={{ color: changeColor, fontFamily: 'monospace', fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                {headerData.currentPrice.toLocaleString('ko-KR')}
+              </span>
+              <span style={{ color: changeColor, fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700 }}>
+                {changeSign}{headerData.changeAmount.toLocaleString('ko-KR')} ({changeSign}{headerData.changeRate.toFixed(2)}%)
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span style={{ color: '#8b949e', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                {t('chart.open')} <span style={{ color: '#c9d1d9' }}>{headerData.openPrice.toLocaleString('ko-KR')}</span>
+              </span>
+              <span style={{ color: '#8b949e', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                {t('chart.high')} <span style={{ color: '#ef5350' }}>{headerData.highPrice.toLocaleString('ko-KR')}</span>
+              </span>
+              <span style={{ color: '#8b949e', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                {t('chart.low')} <span style={{ color: '#1976d2' }}>{headerData.lowPrice.toLocaleString('ko-KR')}</span>
+              </span>
+            </div>
           </>
         )}
       </div>
 
       {/* 탭 */}
-      <div style={{ display: 'flex', gap: '4px', padding: '8px 16px', borderBottom: '1px solid #1e2533' }}>
+      <div style={{ display: 'flex', gap: '6px', padding: '0 20px 12px' }}>
         {PERIOD_TABS.map(tab => (
           <button key={tab.code} onClick={() => setPeriod(tab.code)}
             style={{
-              padding: '4px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer',
-              fontSize: '0.8rem', fontWeight: period === tab.code ? 600 : 400,
-              background: period === tab.code ? '#1e2533' : 'transparent',
-              color: period === tab.code ? '#d1d4dc' : '#787b86',
+              padding: '5px 14px', borderRadius: '999px', border: 'none', cursor: 'pointer',
+              fontSize: '0.8rem', fontWeight: period === tab.code ? 700 : 500,
+              background: period === tab.code ? '#1f6feb' : '#161b22',
+              color: period === tab.code ? '#fff' : '#8b949e',
+              transition: 'all 0.15s',
             }}>
             {t(tab.labelKey)}
           </button>
@@ -258,7 +282,7 @@ export default function CandleChart({ stockCode, stockName }: CandleChartProps) 
       </div>
 
       {/* 차트 */}
-      <div style={{ position: 'relative', flex: 1 }}>
+      <div style={{ position: 'relative', height: 540, borderTop: '1px solid #1e2533' }}>
         {loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13, 17, 23, 0.8)', zIndex: 10 }}>
             <div style={{ width: 32, height: 32, border: '3px solid #1e2533', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
