@@ -420,6 +420,7 @@ CREATE TABLE condition_triggers (
 );
 
 CREATE INDEX idx_conditions_user_active ON trading_conditions(user_id, is_active);
+CREATE INDEX idx_conditions_stock_active ON trading_conditions(stock_code, is_active);
 CREATE INDEX idx_triggers_condition ON condition_triggers(condition_id);
 
 CREATE TABLE trading_histories (

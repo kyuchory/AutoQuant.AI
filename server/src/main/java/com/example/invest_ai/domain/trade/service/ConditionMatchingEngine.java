@@ -17,10 +17,12 @@ import com.example.invest_ai.domain.trade.repository.TradingConditionRepository;
 import com.example.invest_ai.global.websocket.WebSocketSessionManager;
 import com.example.invest_ai.infra.config.RedisKeys;
 import com.example.invest_ai.infrastructure.redis.RedisPriceClient;
+import com.example.invest_ai.config.AsyncConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
@@ -62,13 +64,28 @@ public class ConditionMatchingEngine {
     private final RedisPriceClient redisPriceClient;
     private final WebSocketSessionManager webSocketSessionManager;
 
-    /** 1. 시세 갱신 이벤트 구독 (KIS WebSocket) */
+    /**
+     * 1. 시세 갱신 이벤트 구독 (KIS WebSocket)
+     *
+     * @Async 필수: 이 이벤트는 KIS WebSocket 수신 스레드(Reactor Netty 이벤트 루프)에서 동기로
+     * publishEvent()되므로, 여기서 블로킹하면(주문 체결 시 KIS REST .block() 호출이 최대 8초)
+     * 그 스레드가 처리하는 모든 감시 종목의 실시간 시세 수신이 그동안 멈춘다.
+     * 별도 스레드풀({@link AsyncConfig#CONDITION_MATCHING_EXECUTOR})로 즉시 넘겨 웹소켓 수신 스레드를
+     * 절대 블로킹하지 않도록 한다.
+     */
+    @Async(AsyncConfig.CONDITION_MATCHING_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPriceUpdated(PriceUpdatedEvent event) {
         evaluateConditionsForStock(event.stockCode(), event.currentPrice());
     }
 
-    /** 2. AI 뉴스 감성 분석 저장 이벤트 구독 (실시간 AI 점수 조건 매칭) */
+    /**
+     * 2. AI 뉴스 감성 분석 저장 이벤트 구독 (실시간 AI 점수 조건 매칭)
+     *
+     * @Async: 이 이벤트는 RabbitMQ news-queue 리스너 스레드에서 발행된다. 여기서 주문 체결까지
+     * 블로킹하면 뉴스 큐 처리 자체가 지연되므로 동일한 이유로 별도 스레드풀에서 실행한다.
+     */
+    @Async(AsyncConfig.CONDITION_MATCHING_EXECUTOR)
     @EventListener
     public void onNewsSentimentSaved(NewsSentimentSavedEvent event) {
         log.info("[매매 엔진] 신규 뉴스 AI 점수 수신: stock={}, score={}, sentiment={}",
@@ -107,6 +124,13 @@ public class ConditionMatchingEngine {
         if (triggers.isEmpty())
             return false;
 
+        // 트레일링 스탑 고점 갱신은 AND/OR 매칭 결과와 무관하게 "모든" 트리거에 대해 먼저 수행한다.
+        // AND 로직에서 앞쪽 트리거가 불일치해 매칭 루프가 조기 반환되면, 그 뒤에 놓인 트레일링 스탑
+        // 트리거는 이번 틱에 evaluateTrigger()가 아예 호출되지 않아 고점 갱신을 놓치기 때문이다.
+        for (ConditionTrigger trigger : triggers) {
+            updateTrailingHighestIfNeeded(trigger, currentPrice);
+        }
+
         boolean isAnd = !"OR".equals(condition.getConditionLogic());
 
         boolean result = isAnd;
@@ -125,15 +149,17 @@ public class ConditionMatchingEngine {
         return result;
     }
 
-    /** 단일 트리거 평가 */
-    private boolean evaluateTrigger(TradingCondition condition, ConditionTrigger trigger, BigDecimal currentPrice) {
-        // 트레일링 스탑: 고점 갱신 먼저 수행
+    /** 트레일링 스탑 고점 갱신 (evaluate()에서 AND/OR 매칭과 별도로 모든 트리거에 대해 먼저 호출) */
+    private void updateTrailingHighestIfNeeded(ConditionTrigger trigger, BigDecimal currentPrice) {
         if (TRAILING_STOP.equals(trigger.getTriggerType())) {
             if (trigger.getTrailingHighest() == null || currentPrice.compareTo(trigger.getTrailingHighest()) > 0) {
                 trigger.updateTrailingHighest(currentPrice);
             }
         }
+    }
 
+    /** 단일 트리거 평가 */
+    private boolean evaluateTrigger(TradingCondition condition, ConditionTrigger trigger, BigDecimal currentPrice) {
         BigDecimal compareValue = resolveCompareValue(trigger.getBaseType(), condition, currentPrice);
         if (compareValue == null)
             return false;
@@ -204,9 +230,12 @@ public class ConditionMatchingEngine {
         }
 
         // ── 동시성 락 (Redis 2차 방어선) ──
+        // TTL은 KisOrderClient.executeOrder()의 최악 소요시간(레이트리미터 대기 3초 + HTTP 타임아웃 5초
+        // = 최대 8초)보다 넉넉히 길어야 한다. 과거 4초로 설정했을 때 락이 주문 응답보다 먼저 만료되어
+        // 같은 조건이 중복 체결될 수 있었다 (RedisKeys.rateOrderLock 참고).
         String lockKey = RedisKeys.rateOrderLock(condition.getUserId(), condition.getStockCode());
         Boolean acquired = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(4));
+                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(10));
         if (!Boolean.TRUE.equals(acquired)) {
             log.info("동시성 락 획득 실패로 주문/제안 스킵: conditionId={}", condition.getConditionId());
             return;

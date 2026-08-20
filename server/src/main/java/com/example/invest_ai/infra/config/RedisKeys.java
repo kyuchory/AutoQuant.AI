@@ -168,7 +168,9 @@ public final class RedisKeys {
      * 자동매매 동시성 락 키를 반환합니다.
      * Writer: 조건 매칭 워커 (주문 시도 직전)
      * Reader: 동일 워커 (락 존재 여부 확인)
-     * TTL: 4초 (SET ... NX EX 4)
+     * TTL: 10초 (SET ... NX EX 10) — KisOrderClient.executeOrder()의 최악 소요시간
+     *      (레이트리미터 대기 3초 + HTTP 타임아웃 5초 = 최대 8초)보다 넉넉히 길게 잡아,
+     *      느린 KIS 응답 중에 락이 먼저 만료되어 중복 주문이 나가는 것을 방지한다.
      * Value: "locked"
      */
     public static String rateOrderLock(Long userId, String stockCode) {

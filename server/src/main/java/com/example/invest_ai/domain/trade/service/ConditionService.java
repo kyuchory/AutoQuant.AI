@@ -226,6 +226,11 @@ public class ConditionService {
                 if (!valid) {
                     throw new CustomException(ErrorCode.INVALID_TRIGGER, "트레일링 스탑은 baseType=HIGHEST_PRICE, compareType=BELOW, isRate=true 여야 합니다.");
                 }
+                // targetValue는 "고점 대비 -N%"를 뜻하는 음수여야 한다. 0 이상을 넣으면 임계값이
+                // 고점보다 같거나 높아져서 BELOW 비교가 사실상 항상 참이 되어 매 틱마다 체결된다.
+                if (tr.targetValue() == null || tr.targetValue().compareTo(BigDecimal.ZERO) >= 0) {
+                    throw new CustomException(ErrorCode.INVALID_TRIGGER, "트레일링 스탑의 targetValue는 고점 대비 하락률(음수)이어야 합니다. 예: -5");
+                }
             }
         }
     }
