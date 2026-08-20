@@ -233,11 +233,14 @@ interface LanguageState {
 interface PriceData {
   price: number
   changeRate: number    // KIS 전일대비 등락률 (fields[5] PRDY_CTRT)
+  volume: number        // [v9] 해당 틱 체결량 (fields[12] CNTG_VOL) — 분봉/거래량 히스토그램 실시간 갱신용
 }
 
 interface ChartState {
-  prices: Record<string, PriceData>        // stockCode → {price, changeRate}
-  updatePrice: (stockCode: string, price: number, changeRate: number) => void
+  prices: Record<string, PriceData>        // stockCode → {price, changeRate, volume}
+  updatePrice: (stockCode: string, price: number, changeRate: number, volume?: number) => void
+  connectionStatus: 'connected' | 'disconnected'   // [v9] 웹소켓 연속 재연결 실패 시 UI 배지 표시용
+  setConnectionStatus: (status: 'connected' | 'disconnected') => void
 }
 ```
 
@@ -246,6 +249,8 @@ interface ChartState {
 - 이 store는 `authStore`/`assetStore`와 별개로, KIS 실시간 시세(WebSocket 전용 데이터) 처리를 위해 허용된 store이다.
 - **추가 사유**: WebSocket PRICE_TICK 페이로드에는 `conditionId`가 없고 순수 시세 정보(stockCode + currentPrice)만 포함된다. assetStore는 보유 종목만 관리하므로, 10종목 전체 시세를 관리할 별도 store가 필요했다.
 - **[v8] `PRICE_TICK` vs `PRICE_ALERT` 분리**: 초당 전체 종목 시세 브로드캐스트는 `PRICE_TICK`, 사용자가 설정한 가격 조건이 실제로 충족되어 `ConditionMatchingEngine`이 보내는 1회성 알림은 `PRICE_ALERT`(`conditionId` 포함, api.md §6.2)로 이름을 분리한다. 두 이벤트가 이름을 공유하면 조건 발동 알림이 시세 틱에 묻혀 사용자에게 전달되지 않는다.
+- **[v9] `volume` 필드 추가**: 당초 거래량은 `EXECUTION` 이벤트/`executionStore` 전용으로 설계됐으나, `CandleChart`의 분봉/거래량 히스토그램이 실시간으로 갱신되지 않는 문제를 해결하기 위해 `PRICE_TICK` payload와 `chartStore.PriceData`에도 `volume`(해당 틱 체결량)을 추가했다. `executionStore`를 추가로 구독하지 않고 이미 구독 중인 `chartStore` 한 곳에서 캔들+거래량+헤더를 일관되게 갱신하기 위한 선택이다.
+- **[v9] `connectionStatus` 필드 추가**: `socketClient.ts`가 연속 재연결 실패(5회 이상)를 감지하면 `setConnectionStatus('disconnected')`를 호출해 `StockSidebar` 상단에 "실시간 연결 끊김" 배지를 표시한다. 별도 store를 신설하지 않고 이미 웹소켓 상태를 다루는 `chartStore`에 필드로 추가했다(§8 체크리스트의 "store 무분별 증설 금지" 원칙 준수).
 
 **Store 6 (예외): `lib/store/orderProposalStore.ts` — 실시간 반자동 매매 제안 모달 [v7 신규]**
 

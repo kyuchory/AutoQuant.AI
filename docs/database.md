@@ -49,7 +49,7 @@ users ──1:N── trading_histories ──N:1── stocks
                     trading_histories ──N:1── trading_conditions (nullable, 수동매매는 NULL)
 trading_conditions ──1:N── condition_triggers
 stocks ──1:N── news_sentiments
-users ──1:N── ai_investment_reports
+users ──1:N── ai_investment_reports ──N:1── stocks
 ```
 
 ---
@@ -296,17 +296,35 @@ CREATE TABLE news_sentiments (
 
 ---
 
-### ⑧ AI 투자 맞춤 리포트 테이블 (ai_investment_reports)
+### ⑧ AI 투자 맞춤 리포트 테이블 (ai_investment_reports) — v6 정정
+
+> **v6 정정**: `GET /reports/stocks/{stockCode}`(api.md §5.1)가 종목별 최신 리포트를 조회해야 하므로,
+> 실제 구현(및 `AiInvestmentReport` 엔티티)에는 `stock_code` 컬럼과 `stocks` FK가 처음부터 존재했다.
+> 이 문서의 DDL에 누락되어 있던 것을 실제 스키마 기준으로 정정한다(기능 변경 없음, 문서만 갱신).
+
+| 컬럼명 | 타입 | 제약조건 | 설명 |
+|---|---|---|---|
+| report_id | BIGINT | PK, AUTO_INCREMENT | 리포트 식별 ID |
+| user_id | BIGINT | FK(users.user_id), NOT NULL | 리포트 대상 유저 |
+| stock_code | VARCHAR(10) | FK(stocks.stock_code), NOT NULL | 리포트 대상 종목 |
+| report_content | TEXT | NOT NULL | 리포트 본문(JSON 문자열) |
+| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | 생성 일시 |
 
 ```sql
 CREATE TABLE ai_investment_reports (
     report_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
+    stock_code VARCHAR(10) NOT NULL,
     report_content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    CONSTRAINT fk_ai_investment_reports_user_id FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_ai_investment_reports_stock_code FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
 );
 ```
+
+> **v7 정정**: 운영 DB의 자동생성 FK명(`ai_investment_reports_ibfk_1`, `FKh0vpbhfnukl9fxc1wx8pssc4w`)을
+> 위 이름으로 마이그레이션 완료(`ALTER TABLE ... DROP FOREIGN KEY ... / ADD CONSTRAINT ...`).
+> 이제 문서와 실제 스키마가 일치한다.
 
 ---
 
@@ -442,8 +460,10 @@ CREATE TABLE news_sentiments (
 CREATE TABLE ai_investment_reports (
     report_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
+    stock_code VARCHAR(10) NOT NULL,
     report_content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    CONSTRAINT fk_ai_investment_reports_user_id FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_ai_investment_reports_stock_code FOREIGN KEY (stock_code) REFERENCES stocks(stock_code)
 );
 ```

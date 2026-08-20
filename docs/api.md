@@ -484,7 +484,7 @@ wss://{host}/ws?token={accessToken}
 
 | type | 발생 시점 | payload 예시 |
 |---|---|---|
-| `PRICE_TICK` | KIS 실시간 체결가 수신 (전체 모니터링 종목, 조건과 무관) | `{ stockCode, currentPrice, changeRate }` |
+| `PRICE_TICK` | KIS 실시간 체결가 수신 (전체 모니터링 종목, 조건과 무관) | `{ stockCode, currentPrice, changeRate, volume }` (v9: 분봉 차트 실시간 거래량 갱신을 위해 `volume`(해당 틱 체결량) 추가) |
 | `PRICE_ALERT` | 가격 조건 충족 (v8: `PRICE_TICK`과 이름 분리) | `{ conditionId, stockCode, currentPrice }` |
 | `AI_SCORE_ALERT` | AI 감성 점수 조건 충족 | `{ conditionId, stockCode, aiScore }` |
 | `ORDER_FILLED` | 자동/수동 주문 체결 완료 | `{ historyId, stockCode, executionPrice, executionQuantity }` |

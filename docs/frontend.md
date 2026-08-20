@@ -324,7 +324,7 @@ export const SOCKET_EVENTS = {
 
 | 이벤트 | payload | 처리 |
 |---|---|---|
-| `PRICE_TICK` | `{ stockCode, currentPrice, changeRate }` | `assetStore.updateHoldingPrice` + `chartStore.updatePrice` (전체 종목 시세 갱신, conditionId 없음) |
+| `PRICE_TICK` | `{ stockCode, currentPrice, changeRate, volume }` (v9: `volume` 추가) | `assetStore.updateHoldingPrice` + `chartStore.updatePrice` (전체 종목 시세 갱신, conditionId 없음). `volume`은 `CandleChart`가 실시간 분봉/거래량 히스토그램을 갱신하는 데 사용 |
 | `PRICE_ALERT` | `{ conditionId, stockCode, currentPrice }` | 토스트 알림 표시 (TODO: 토스트 컴포넌트 미구현, 현재 콘솔 로그로만 노출) |
 | `AI_SCORE_ALERT` | `{ conditionId, stockCode, aiScore }` | 토스트 알림 표시 (TODO: 토스트 컴포넌트 미구현, 현재 콘솔 로그로만 노출) |
 | `ORDER_FILLED` | `{ historyId, stockCode, executionPrice, executionQuantity }` | 토스트 + `assetStore.applyOrderFilled()` |
@@ -492,8 +492,10 @@ export interface ReportReadyPayload {
 
 ```bash
 # .env.local
-NEXT_PUBLIC_API_URL=http://localhost:8080
-NEXT_PUBLIC_WS_URL=ws://localhost:8080
+# REST/WS 접미사(/api/v1, /ws)까지 포함한다 — lib/api/client.ts, lib/socket/socketClient.ts가
+# 이 값을 그대로 baseURL/접속 URL로 사용하며, 값이 없을 때의 fallback도 접미사 포함 형태다.
+NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws
 NEXT_PUBLIC_KAKAO_CLIENT_ID={REST API 키}
 NEXT_PUBLIC_KAKAO_REDIRECT_URI=http://localhost:3000/callback/kakao
 ```
