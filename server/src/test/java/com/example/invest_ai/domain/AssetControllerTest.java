@@ -50,7 +50,8 @@ class AssetControllerTest {
         AssetSummaryResponse resp = new AssetSummaryResponse(new BigDecimal("10000000.0000"),
                 new BigDecimal("795000.0000"), new BigDecimal("45000.0000"), new BigDecimal("6.00"),
                 List.of(new HoldingInfo("005930", "삼성전자", 10, new BigDecimal("75000.0000"),
-                        new BigDecimal("79500.0000"), new BigDecimal("795000.0000"), new BigDecimal("6.00"))));
+                        new BigDecimal("79500.0000"), new BigDecimal("795000.0000"),
+                        new BigDecimal("45000.0000"), new BigDecimal("6.00"))));
         given(assetSummaryService.getAssetSummary(USER_ID)).willReturn(resp);
         ApiResponse<AssetSummaryResponse> result = controller.getAssets();
         assertThat(result.success()).isTrue();
@@ -67,7 +68,7 @@ class AssetControllerTest {
     @Test
     @DisplayName("createOrder: BUY 정상 응답")
     void createOrder_BUY_정상_응답반환() {
-        OrderRequest req = new OrderRequest("005930", "BUY", 3);
+        OrderRequest req = new OrderRequest("005930", "BUY", 3, "01", null);
         OrderResponse resp = new OrderResponse(101L, "005930", "BUY", "FILLED", new BigDecimal("79500.0000"), 3, new BigDecimal("238500.0000"), null, "2026-07-21T12:00:00", "2026-07-21T12:00:00");
         given(assetService.executeOrder(eq(USER_ID), any())).willReturn(resp);
         ApiResponse<OrderResponse> result = controller.createOrder(req);
@@ -78,7 +79,7 @@ class AssetControllerTest {
     @Test
     @DisplayName("createOrder: 잔고부족 E4001 예외 전파")
     void createOrder_잔고부족_E4001발생() {
-        OrderRequest req = new OrderRequest("005930", "BUY", 999);
+        OrderRequest req = new OrderRequest("005930", "BUY", 999, "01", null);
         given(assetService.executeOrder(eq(USER_ID), any())).willThrow(new CustomException(ErrorCode.INSUFFICIENT_BALANCE));
         assertThatThrownBy(() -> controller.createOrder(req)).isInstanceOf(CustomException.class);
     }

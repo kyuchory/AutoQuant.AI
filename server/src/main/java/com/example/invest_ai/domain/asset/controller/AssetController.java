@@ -4,8 +4,11 @@ import com.example.invest_ai.domain.asset.dto.AssetDto.*;
 import com.example.invest_ai.domain.asset.service.AssetService;
 import com.example.invest_ai.domain.asset.service.AssetSummaryService;
 import com.example.invest_ai.global.common.ApiResponse;
+import com.example.invest_ai.global.common.PageResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,6 +35,18 @@ public class AssetController {
     public ApiResponse<OrderResponse> createOrder(@Valid @RequestBody OrderRequest request) {
         Long userId = getCurrentUserId();
         return ApiResponse.success(assetService.executeOrder(userId, request));
+    }
+
+    /** GET /api/v1/assets/histories — 매매 체결 이력 페이징 조회 (api.md §3.3) */
+    @GetMapping("/histories")
+    public ApiResponse<PageResponse<OrderResponse>> getHistories(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String stockCode,
+            @RequestParam(required = false) String status) {
+        Long userId = getCurrentUserId();
+        Pageable pageable = PageRequest.of(page, size);
+        return ApiResponse.success(assetService.getHistories(userId, stockCode, status, pageable));
     }
 
     /** SecurityContext에서 userId 추출 */
