@@ -264,7 +264,7 @@ public class KisWebsocketClient {
         try {
             // KIS H0STCNT0 pipe 필드 (docs/kisflow.md §4와 동기화됨):
             // fields[0]=MKSC_SHRN_ISCD, [1]=STCK_CNTG_HOUR, [2]=STCK_PRPR(체결가),
-            // [5]=PRDY_CTRT(등락률), [9]=CNTG_VOL(체결량), [12]=PRDY_VRSS_SIGN(전일대비부호),
+            // [5]=PRDY_CTRT(등락률), [9]=STCK_LWPR(저가), [12]=CNTG_VOL(체결량),
             // [13]=ACML_VOL(누적거래량), [21]=CCLD_DVSN(매수/매도 구분: 1=매수, 5=매도)
             String[] parts = payload.split("\\|");
             if (parts.length >= 4 && "H0STCNT0".equals(parts[1])) {
@@ -275,7 +275,7 @@ public class KisWebsocketClient {
                     String priceStr  = fields[2];                                   // 체결가
                     String sign      = fields.length > 21 ? fields[21] : "5";       // 매수/매도 구분 CCLD_DVSN (1:매수, 5:매도)
                     String changeStr = fields.length > 5 ? fields[5] : "0";         // 등락률 PRDY_CTRT
-                    String volumeStr = fields.length > 9 ? fields[9] : "0";         // 체결량 CNTG_VOL
+                    String volumeStr = fields.length > 12 ? fields[12] : "0";       // 체결량 CNTG_VOL (fields[9]는 STCK_LWPR=저가이므로 오인 주의)
                     String acmlVol   = fields.length > 13 ? fields[13] : "0";       // 누적거래량 ACML_VOL
 
                     // Redis 현재가 + 등락률 저장 (redisflow.md §2.1: 소수점 4자리 문자열로 통일)

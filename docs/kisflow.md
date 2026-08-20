@@ -72,8 +72,8 @@ KIS WebSocket H0STCNT0 TR 수신 시 `^` 구분자로 분할된 파이프 데이
 | `fields[1]` | STCK_CNTG_HOUR | 체결시간 (HHMMSS) | ExecutionList |
 | `fields[2]` | STCK_PRPR | 체결가 | **PRICE_TICK**, ExecutionList |
 | `fields[5]` | PRDY_CTRT | 전일대비 등락률 | **PRICE_TICK**, ExecutionList, StockSidebar |
-| `fields[9]` | CNTG_VOL | 체결량 | ExecutionList |
-| `fields[12]` | PRDY_VRSS_SIGN | 전일대비 부호 | |
+| `fields[9]` | STCK_LWPR | 저가 (체결량 아님, 혼동 주의) | |
+| `fields[12]` | CNTG_VOL | 체결량 | ExecutionList |
 | `fields[13]` | ACML_VOL | 누적거래량 | ExecutionList |
 | `fields[21]` | CCLD_DVSN | **매수/매도 구분** (1=매수, 5=매도) | ExecutionList 체결량 컬러 |
 
