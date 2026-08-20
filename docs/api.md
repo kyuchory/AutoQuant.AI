@@ -13,7 +13,7 @@
 | 공통 응답 포맷 | `{ success, code, message, data }` |
 | 목록 페이징 | Offset 기반 (`page`, `size` 쿼리 파라미터) |
 | WebSocket 메시지 포맷 | `{ type, payload }` 구조의 JSON 이벤트 |
-| 에러 코드 체계 | `E{HTTP상태코드}{일련번호}` 형식 (예: E4001) |
+| 에러 코드 체계 | ~~`E{HTTP상태코드}{일련번호}` 형식 (예: E4001)~~ → **[정정] 실제 구현은 `ErrorCode` enum 이름을 그대로 `code` 필드에 사용한다** (예: `REPORT_NOT_FOUND`, `DUPLICATE_HOLDING`). §1.4 참고. |
 | Refresh Token 재발급 정책 | Rotation 방식 (재발급 시마다 새 Refresh Token 발급) |
 | 인증 헤더 | `Authorization: Bearer {accessToken}` |
 
@@ -57,7 +57,9 @@ Authorization: Bearer {accessToken}
 
 ### 1.4 공통 에러 코드
 
-| 코드 | HTTP Status | 의미 |
+> **[v10 정정]** 이 절은 본래 `E{HTTP상태코드}{일련번호}` 숫자 코드 체계로 작성됐으나, 실제 `GlobalExceptionHandler`(clinerules.md §2.6)는 `CustomException`에 담긴 `ErrorCode` enum의 **이름 문자열**을 그대로 `code` 필드에 반환한다(예: `code: "REPORT_NOT_FOUND"`). §0에서 이 문서 자체가 "확정 전 채택한 기본값이며 실제 구현과 다르면 이 부분만 수정하면 된다"고 명시하고 있어, AI 리포트 관련 엔드포인트(§5.1, §5.4)부터 실제 구현 기준으로 정정했다. 아래 표의 숫자 코드는 나머지 도메인(인증/조건/자산)의 문서상 참고용으로 남겨두되, 실제 값은 각 도메인 `ErrorCode` enum을 기준으로 삼는다 — 전체 표를 실제 코드 기준으로 맞추는 작업은 이 리포트 기능 수정과 별개로 진행 필요.
+
+| 코드(문서 초안, 실제와 다를 수 있음) | HTTP Status | 의미 |
 |---|---|---|
 | E4001 | 400 | 요청 값 검증 실패 (예: conditionLogic 없이 두 조건 동시 입력 등) |
 | E4010 | 401 | 인증 토큰 없음/만료 |
@@ -67,6 +69,14 @@ Authorization: Bearer {accessToken}
 | E4090 | 409 | 중복 리소스 (`uk_holdings_user_stock`, `uk_users_email` 등 제약 위반) |
 | E5000 | 500 | 서버 내부 오류 |
 | E5030 | 503 | 외부 API(KIS/네이버/OpenAI) 장애 |
+
+**리포트 도메인 실제 코드 (v10 확정)**
+
+| 코드 | HTTP Status | 의미 |
+|---|---|---|
+| `REPORT_NOT_FOUND` | 404 | 아직 생성된 리포트가 없음 |
+| `REPORT_GENERATION_FAILED` | 500 | (예약 — 현재 워커는 실패 시 예외 대신 이전 리포트를 그대로 유지하고 로그만 남김) |
+| `REPORT_REFRESH_RATE_LIMITED` | 429 | 동일 종목 30초 내 중복 새로고침 요청 |
 
 ### 1.5 페이징 공통 쿼리 파라미터
 
@@ -126,6 +136,7 @@ OAuth Authorization Code를 받아 로그인 처리 및 JWT 발급. 신규 유�
 }
 ```
 - Refresh Token은 응답 바디에 포함하지 않고 `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Max-Age=1209600` 로 전달.
+  - **[v10 정정]** `Secure`는 HTTPS에서만 브라우저가 쿠키를 전송하므로, 로컬 개발(HTTP)에서는 `application.yml`의 `app.cookie.secure=false`로 완화하고 이때 `SameSite`도 `Lax`로 낮춘다(`AuthController.cookieSecure`). **배포 환경에서는 `app.cookie.secure=true`로 반드시 오버라이드**해야 위 스펙(Secure/Strict)대로 동작한다.
 
 **에러**
 - `E4001` : 지원하지 않는 provider
@@ -431,7 +442,7 @@ Redis 캐시 우선 조회. 캐시 미스 시 `ai_investment_reports`의 최신 
 - `createdAt`: 리포트 생성 일시 (ISO 8601)
 
 **에러**
-- `E4041` : 아직 생성된 리포트가 없는 경우 → 프론트는 "새로고침" 버튼 유도
+- (404) : 아직 생성된 리포트가 없는 경우 → 프론트는 "새로고침" 버튼 유도. 응답 `code` 필드는 `REPORT_NOT_FOUND`.
 
 ---
 
@@ -451,7 +462,7 @@ Redis 캐시를 우회하고 RabbitMQ에 새 리포트 생성 티켓 발행 (비
 - 최종 결과는 WebSocket `REPORT_READY` 이벤트로 push되거나, 클라이언트가 §5.1을 재조회.
 
 **에러**
-- `E4290` (429) : 동일 종목에 대해 짧은 시간 내 중복 새로고침 요청 (Rate limit — 예: 종목당 1분 1회)
+- (429) : 동일 종목에 대해 짧은 시간 내 중복 새로고침 요청. `rate:report:refresh:{stockCode}`(redisflow.md §2.2-2) 기준 **종목당 30초에 1회**로 제한. 응답 `code` 필드는 `REPORT_REFRESH_RATE_LIMITED`.
 
 ---
 
